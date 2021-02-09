@@ -82,44 +82,43 @@ private var userSpecifiedSchema: Option[StructType] = None
 private val extraOptions = new scala.collection.mutable.HashMap[String, String]
 ```
 
-本示例中指定 "source=parquet", 然后自定义了需要读取的 schema. 如果没有自定义, 那默认会读取 Parquet文件中所有的列.
+本示例中指定 "source=parquet", 然后自定义了需要读取的 schema. 如果没有自定义, 那默认会读取所有列.
 
 接下来看下 Spark 怎么 load 数据到 Dataset, 最后是怎么生成 RDD的, 如下图所示
 
 ![data reader](/docs/spark/data-reader/datareader-overview.svg)
 
-从图中可以看出, DataFrameReader 首先根据 source 以及 `spark.sql.sources.useV1SourceList` 查找是否使用 data source v2 的实现.
+从图中可以看出,
 
-目前在 spark 3.1.1 中, useV1SourceList 默认为 **"avro,csv,json,kafka,orc,parquet,text"**.
+- 首先确定是使用 v1 还是 v2 data source
+  - DataFrameReader 通过 ServiceLoader 加载 DataSourceRegister 且 [已经声明]((https://github.com/apache/spark/blob/v3.1.1-rc1/sql/core/src/main/resources/META-INF/services/org.apache.spark.sql.sources.DataSourceRegister#L6)) 的实现类, 以及 `spark.sql.sources.useV1SourceList` 查找是否使用 data source v1 的实现. 目前在 spark 3.1.1 中, useV1SourceList 默认为 **"avro,csv,json,kafka,orc,parquet,text"**.
 
-另外需要向 META-INFO/services/`org.apache.spark.sql.sources.DataSourceRegister` 文件中声明DataSourceRegister 的 v2 data source 实现类, 参考[这里](https://github.com/apache/spark/blob/v3.1.1-rc1/sql/core/src/main/resources/META-INF/services/org.apache.spark.sql.sources.DataSourceRegister#L6).
+- 然后创建 InMemoryFileIndex 并获得 dataSchema, partitionSchema 等.
+- 最后创建 LogicalPlan
+  - 对于 v1, 生成 HadoopFsRelation, 并创建 LogicalPlan.
 
-- **v1 LogicalPlan**
+    HadoopFsRelation字段 ||
+    ------------ | -------------
+    location: FileIndex | 一个接口用来枚举出所有的源文件path,以及分区
+    partitionSchema: StructType | 用于分区的列 schema
+    dataSchema: StructType | 需要读取的列 schema
+    bucketSpec: Option[BucketSpec] | 描述是否是 bucketing ?
+    fileFormat: FileFormat | V1 的 FileFormat 用于读写文件
+    options: Map[String, String] | 用来读写数据的配置项,也就是 DataFrameReader 里的 extraOptions
 
-对于 v1 的 data source, 最终生成的是 HadoopFsRelation, 并被包裹成 LogicalPlan.
+  - 对于 v2, 通过 getTable 获得 Table, 并创建 DataSourceV2Relation.
 
-HadoopFsRelation字段 ||
------------- | -------------
-location: FileIndex | 一个接口用来枚举出所有的源文件path,以及分区
-partitionSchema: StructType | 用于分区的列 schema
-dataSchema: StructType | 需要读取的列 schema
-bucketSpec: Option[BucketSpec] | 描述是否是 bucketing ?
-fileFormat: FileFormat | V1 的 FileFormat 用于读写文件
-options: Map[String, String] | 用来读写数据的配置项,也就是 DataFrameReader 里的 extraOptions
+    几乎所有的 Table间接实现类都是继承于 FileTable.
 
-- **v2 LogicalPlan**
-
-对于 v2 的 data source, 最终生成的是 Table, 并被包裹到 DataSourceV2Relation 中, 几乎所有的 Table间接实现类都是继承于 FileTable.
-
-FileTable字段 ||
------------- | -------------
-**fileIndex: PartitioningAwareFileIndex** | 也主是可以识别分区的FileIndex
-dataSchema: StructType| 需要读取的列 schema
-schema: StructType | 整个 Table 的 schema
-String name() | table的名字
-StructType schema() | table的schema
-Transform[] partitioning() | fileIndex.partitionSchema.names.toSeq.asTransforms
-Map<String, String> properties() | Table的属性, options.asCaseSensitiveMap
+    FileTable字段 ||
+    ------------ | -------------
+    **fileIndex: PartitioningAwareFileIndex** | 也主是可以识别分区的FileIndex
+    dataSchema: StructType| 需要读取的列 schema
+    schema: StructType | 整个 Table 的 schema
+    String name() | table的名字
+    StructType schema() | table的schema
+    Transform[] partitioning() | fileIndex.partitionSchema.names.toSeq.asTransforms
+    Map<String, String> properties() | Table的属性, options.asCaseSensitiveMap
 
 ### InMemoryFileIndex
 
@@ -218,3 +217,5 @@ Try(Literal.create(Integer.parseInt(raw), IntegerType))
   ```
 
 下面这张图描述了怎么样推断出 Parquet 的 schema. ![parquet-infer-schema](/docs/spark/data-reader/datareader-parquet-infer-schema.svg)
+
+## LogicalPlan 到 PhysicalPlan
