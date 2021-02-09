@@ -1,6 +1,6 @@
 ---
 layout: page
-title: Spark Data Reader
+title: Data Reader
 nav_order: 5
 parent: Spark 
 ---
@@ -69,7 +69,7 @@ Industry_code_ANZSIC06:      OPTIONAL BINARY L:STRING R:0 D:1
 
 示例代码只读取其中 Year, Value Industry_aggregation_NZSIOC06 字段.
 
-## DataFrameReader
+## DataFrameReader到LogicalPlan
 
 **spark.read** 返回一个 DataFrameReader 用于加载外部存储数据到 Dataset. DataFrameReader有三个成员变量分别为
 
@@ -90,13 +90,13 @@ private val extraOptions = new scala.collection.mutable.HashMap[String, String]
 
 从图中可以看出, DataFrameReader 首先根据 source 以及 `spark.sql.sources.useV1SourceList` 查找是否使用 data source v2 的实现.
 
-目前在 spark 3.1.1 中, useV1SourceList 默认为 **"avro,csv,json,kafka,orc,parquet,text"**. 
+目前在 spark 3.1.1 中, useV1SourceList 默认为 **"avro,csv,json,kafka,orc,parquet,text"**.
 
 另外需要向 META-INFO/services/`org.apache.spark.sql.sources.DataSourceRegister` 文件中声明DataSourceRegister 的 v2 data source 实现类, 参考[这里](https://github.com/apache/spark/blob/v3.1.1-rc1/sql/core/src/main/resources/META-INF/services/org.apache.spark.sql.sources.DataSourceRegister#L6).
 
-### v1 LogicalPlan
+- **v1 LogicalPlan**
 
-对于 v1 的 data source, 最终生成的是 HadoopFsRelation, 最后再包裹成 LogicalPlan.
+对于 v1 的 data source, 最终生成的是 HadoopFsRelation, 并被包裹成 LogicalPlan.
 
 HadoopFsRelation字段 ||
 ------------ | -------------
@@ -107,9 +107,9 @@ bucketSpec: Option[BucketSpec] | 描述是否是 bucketing ?
 fileFormat: FileFormat | V1 的 FileFormat 用于读写文件
 options: Map[String, String] | 用来读写数据的配置项,也就是 DataFrameReader 里的 extraOptions
 
-### v2 LogicalPlan
+- **v2 LogicalPlan**
 
-对于 v2 的 data source, 最终生成的是 Table, 最后包裹到 DataSourceV2Relation 中, 几乎所有的 Table间接实现类都是继承于 FileTable.
+对于 v2 的 data source, 最终生成的是 Table, 并被包裹到 DataSourceV2Relation 中, 几乎所有的 Table间接实现类都是继承于 FileTable.
 
 FileTable字段 ||
 ------------ | -------------
@@ -123,13 +123,13 @@ Map<String, String> properties() | Table的属性, options.asCaseSensitiveMap
 
 ### InMemoryFileIndex
 
-v1 和 v2 最后生成的 LogicalPlan 都间接包含 FileIndex, 在这里其实都是 InMemoryFileIndex 这个实现类, InMemoryFileIndex 主要是根据输入的文件或文件夹递归的查找文件, 并推断中分区信息.
+v1 和 v2 最后生成的 LogicalPlan 都间接包含 FileIndex, 在这里其实都是 InMemoryFileIndex 这个实现类, InMemoryFileIndex 主要是根据输入的文件或文件夹递归的查找leaf文件, 并推断出分区信息.
 
-InMemoryFileIndex 在构造函数中就会扫描输入的文件. 如图所示 ![InMemoryFileIndex](/docs/spark/data-reader/datareader-InMemoryFileIndex.svg)
+InMemoryFileIndex 在构造函数中会扫描输入的文件. 如图所示 ![InMemoryFileIndex](/docs/spark/data-reader/datareader-InMemoryFileIndex.svg)
 
-整个过程很简单, 通过 FileSystem.listStatus 来递归的查找 leaf 文件或文件夹. 如果当 leaf 的数量大于由 `spark.sql.sources.parallelPartitionDiscovery.parallelism` 指定的值时 (默认32), 会将查询提交到 Spark cluster 去做, 这样查询速度会更快.
+整个过程很简单, 通过 FileSystem.listStatus 递归的查找 child 文件或文件夹. 如果当 child 的数量大于某个值由 `spark.sql.sources.parallelPartitionDiscovery.parallelism` 指定 (默认32), 会将查询 job 提交到 Spark cluster执行, 这样查询速度会更快.
 
-InMemoryFileIndex 会通过 FileSystem.getFileBlockLocations 获得文件的 BlockLocation ---这个信息对于 Spark Locality 来说非常重要. 最后 InMemoryFileIndex 将查询到的文件信息缓存到
+InMemoryFileIndex 在获得 Leaf 文件后, 通过 FileSystem.getFileBlockLocations 获得该文件的 BlockLocation --- 这个信息对于 Spark Locality 来说非常重要. 最后 InMemoryFileIndex 将查询到的文件信息缓存到变量中.
 
 InMemoryFileIndex 字段 ||
 ------------| -----------
@@ -140,3 +140,81 @@ userSpecifiedPartitionSpec: Option[PartitionSpec]| 用户指定的 PartitionSepc
 cachedLeafFiles: mutable.LinkedHashMap[Path, FileStatus]| 扫描后缓存到 leaf 文件信息 
 cachedLeafDirToChildrenFiles: Map[Path, Array[FileStatus]]| dir -> leafs_of_dir
 cachedPartitionSpec: PartitionSpec| 如果用户没有指定, infer PartitionSpec
+
+#### 推断 PartitionSpec
+
+当用户没有指定 userSpecifiedPartitionSpec 时, InMemoryFileIndex 根据 leafDirs 推断中 PartitionSpec, 具体可以参考 [这里](https://github.com/apache/spark/blob/v3.1.1-rc1/sql/core/src/main/scala/org/apache/spark/sql/execution/datasources/PartitioningUtils.scala#L95).
+
+``` console
+PartitionSpec(
+  partitionColumns = StructType(
+    StructField(name = "Year", dataType = IntegerType, nullable = true),
+  partitions = Seq(
+    Partition(
+      values = Row(2013),
+      path = "file:/data/annual-enterprise/Year=2013"),
+    Partition(
+      values = Row(2014),
+      path = "file:/data/annual-enterprise/Year=2014"),
+    ...)))
+```
+
+推断 column dataType 时, 如果用户指定的 schema 包含了该 column, 就不再推断 dataType, 直接使用用户指定的 dataType, 反之也需要推断出 dataType, 推断也比较简单, 各种 Try.
+
+``` scala
+Try(Literal.create(Integer.parseInt(raw), IntegerType))
+  .orElse(Try(Literal.create(JLong.parseLong(raw), LongType)))
+  .orElse(decimalTry)
+  // Then falls back to fractional types
+  .orElse(Try(Literal.create(JDouble.parseDouble(raw), DoubleType)))
+  // Then falls back to date/timestamp types
+  .orElse(timestampTry)
+  .orElse(dateTry)
+  // Then falls back to string
+  .getOrElse {
+    if (raw == DEFAULT_PARTITION_NAME) {
+      Literal.create(null, NullType)
+    } else {
+      Literal.create(unescapePathName(raw), StringType)
+    }
+  }
+```
+
+### Schema
+
+不管是 v1 还是 v2, 都有很多种类型的 schema, 那这些 schema 是什么意思呢?
+
+- **userSpecifiedSchema**
+  
+  用户在读数据时指定的 schema, 如果没有设置, 则为 empty. 本例中的为
+
+  ``` console
+  StructType(
+    StructField(Year,IntegerType,true),
+    StructField(Value,StringType,true),
+    StructField(Industry_code_ANZSIC06,StringType,true)
+  )
+  ```
+
+- **partitionSchema**
+  
+  用来分区的 schema, 本例为
+
+  ``` console
+  StructType(
+    StructField(Year,IntegerType,true)
+  )
+  ```
+
+- **dataSchema**
+
+  非 partition schema. 如果用户指定了 userSpecifiedSchema, dataSchema=(userSpecifiedSchema - partitionSchema), 如果用户没有指定 userSpecifiedSchema, dataSchema=inferSchema(), 需要自行推断出. 本例为
+
+  ``` console
+  StructType(
+    StructField(Value,StringType,true),
+    StructField(Industry_code_ANZSIC06,StringType,true)
+  )
+  ```
+
+下面这张图描述了怎么样推断出 Parquet 的 schema. ![parquet-infer-schema](/docs/spark/data-reader/datareader-parquet-infer-schema.svg)
