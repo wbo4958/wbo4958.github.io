@@ -33,22 +33,16 @@ def testDataReaderParquet = {
 ``` console
 './Year=2013':
 part-00000-20f3b683-60ba-4b4e-8133-17008d0e102a.c000.snappy.parquet
-
 './Year=2014':
 part-00000-20f3b683-60ba-4b4e-8133-17008d0e102a.c000.snappy.parquet
-
 './Year=2015':
 part-00000-20f3b683-60ba-4b4e-8133-17008d0e102a.c000.snappy.parquet
-
 './Year=2016':
 part-00000-20f3b683-60ba-4b4e-8133-17008d0e102a.c000.snappy.parquet
-
 './Year=2017':
 part-00000-20f3b683-60ba-4b4e-8133-17008d0e102a.c000.snappy.parquet
-
 './Year=2018':
 part-00000-20f3b683-60ba-4b4e-8133-17008d0e102a.c000.snappy.parquet
-
 './Year=2019':
 part-00000-20f3b683-60ba-4b4e-8133-17008d0e102a.c000.snappy.parquet
 ```
@@ -83,6 +77,10 @@ private val extraOptions = new scala.collection.mutable.HashMap[String, String]
 ```
 
 本示例中指定 "source=parquet", 然后自定义了需要读取的 schema. 如果没有自定义, 那默认会读取所有列.
+
+首先看下 data source 的类图结构. 几乎所有的 data source 都直接或间接实现了 DataSourceRegister, 而 v1 data source 实现了 FileFormat, v2 data source 实现 TableProvider 并继承于 FileDataSourceV2.
+
+![data source](/docs/spark/data-reader/datareader-data-source.svg)
 
 接下来看下 Spark 怎么 load 数据到 Dataset, 最后是怎么生成 RDD的, 如下图所示
 
@@ -181,7 +179,7 @@ Try(Literal.create(Integer.parseInt(raw), IntegerType))
 
 ### Schema
 
-不管是 v1 还是 v2, 都有很多种类型的 schema, 那这些 schema 是什么意思呢?
+不管是 v1 还是 v2, 都有很多种类型的 schema, 那这些 schema 是什么呢?
 
 - **userSpecifiedSchema**
   
@@ -219,3 +217,27 @@ Try(Literal.create(Integer.parseInt(raw), IntegerType))
 下面这张图描述了怎么样推断出 Parquet 的 schema. ![parquet-infer-schema](/docs/spark/data-reader/datareader-parquet-infer-schema.svg)
 
 ## LogicalPlan 到 PhysicalPlan
+
+- v1
+
+  对于 v1. LogicalPlan(HadoopFsRelation) 在 [FileSourceStrategy](https://github.com/apache/spark/blob/v3.1.1-rc1/sql/core/src/main/scala/org/apache/spark/sql/execution/datasources/FileSourceStrategy.scala#L145) 中被替换成 FileSourceScanExec.
+
+- v2
+
+  对于 v2. 在 Optimization的 rule [V2ScanRelationPushDown](https://github.com/apache/spark/blob/v3.1.1-rc1/sql/core/src/main/scala/org/apache/spark/sql/execution/datasources/v2/V2ScanRelationPushDown.scala#L32) 将 DataSourceV2Relation 替换成DataSourceV2ScanRelation, 且 FileTable 通过 newScanBuilder 生成 Scan, 如 Parquet/CSV/OrcTable -> Parquet/CSV/OrcScan等. 紧接着在 [DataSourceV2Strategy](https://github.com/apache/spark/blob/v3.1.1-rc1/sql/core/src/main/scala/org/apache/spark/sql/execution/datasources/v2/DataSourceV2Strategy.scala#L108) 中, DataSourceV2ScanRelation 被替换成 BatchScanExec.
+
+## PhysicalPlan 到 RDD
+
+PhysicalPlan 生成最后的 RDD. 对于 Row-wised 的 PhysicalPlan 通过 doExecute() 触发, 而对于 Columnar-wised 通过 doExecuteColumnar 来触发.
+
+![physicalplan rdd](/docs/spark/data-reader/datareader-physicalplan-rdd.svg)
+
+- v1
+
+  对于 v1. readFunction 也就是 FileScanRDD 的计算, filePartitions 是 readFunction 计算数据(这里并不是真实的文件内的数据, 相反是文件信息)
+
+- v2
+
+  对于 v2. PartitionReaderFactory 通过 createColumnarReader 或 createReader 创建计算函数.
+
+![rdd-read](/docs/spark/data-reader/datareader-rdd-read.svg)
