@@ -95,7 +95,7 @@ dfs.namenode.edits.dir        | editlog 的目录
 
 - saveInodes
   
-  保存 INode 的相关信息
+  保存 INode 的相关信息, format 后所有的  INode 信息都清空， 那 saveInodes 只会保存 lastInodeId: 16385, 以及 inode number=1 (root inode)
 
 - saveSnapshots
 - saveSecretManagerSection
