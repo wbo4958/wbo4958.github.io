@@ -1,6 +1,6 @@
 ---
 layout: page
-title: NameNode format
+title: NameNode 格式化
 nav_order: 5
 parent: HDFS
 ---

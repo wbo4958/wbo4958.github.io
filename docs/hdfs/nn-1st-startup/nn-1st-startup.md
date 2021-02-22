@@ -1,6 +1,6 @@
 ---
 layout: page
-title: NameNode 1st startup
+title: NameNode 第一次启动 
 nav_order: 10
 parent: HDFS
 has_toc: true
