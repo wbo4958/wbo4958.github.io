@@ -15,7 +15,7 @@ parent: HDFS
 hdfs --daemon start namenode
 ```
 
-![format-overview](/docs/hdfs/nn-format/hdfs-NN-format.svg)
+![1st-startup](/docs/hdfs/nn-1st-startup/hdfs-NN-1st-startup.svg)
 
 ## loadNameSpace
 
@@ -111,3 +111,12 @@ NameNodeRpcServer 当收到 API 请求时， NameNodeRpcServer 利用 NameNode, 
 ### start rpc
 
 NameNode rpc 开始工作
+
+## startActiveServices
+
+NameNode在初始化之间会创建一个 HAState, 没有开启 HA 模式时， 默认会创建 ActiveState. 在 NameNode 初始化后， NameNode 进入 Active Stage, 并启动一些仅当 Active Stage 时才能开启的服务线程. 如,
+
+service |
+----- | -----
+NameNodeResourceMonitor | 检查 NN 可用资源， 必要时进入 safe mode
+NameNodeEditLogRoller | roll edit log, 关闭当前 edit log, 创建一个新的 edit log
