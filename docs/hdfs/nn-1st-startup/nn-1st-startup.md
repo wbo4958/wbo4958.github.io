@@ -3,9 +3,19 @@ layout: page
 title: NameNode 1st startup
 nav_order: 10
 parent: HDFS
+has_toc: true
 ---
 
-本文通过学习 NameNode 第一次启动流程来了解 NameNode 中使用到的 rpc, 线程结构以及 NameNode 相关的类. 本文基于 hadoop/branch-3.3.0
+# NameNode 第一次启动
+{: .no_toc }
+
+本文通过学习 NameNode 第一次启动流程来了解 NameNode 中使用到的 rpc, service 线程以及 NameNode 相关的类. 本文基于 hadoop/branch-3.3.0
+
+## 目录
+{: .no_toc .text-delta}
+
+1. TOC
+{:toc}
 
 ## NameNode startup overview
 
@@ -17,7 +27,9 @@ hdfs --daemon start namenode
 
 ![1st-startup](/docs/hdfs/nn-1st-startup/hdfs-NN-1st-startup.svg)
 
-## loadNameSpace
+## loadNamesystem
+
+loadNamesystem 主要是将 fsimage 文件加载到 FSNamesystem.
 
 ### readAndInspectDirs
 
@@ -32,7 +44,9 @@ FSImageTransactionalStorageInspector 主要作用是
 ### initEditLog
 
 1. 创建 JournalSet - 用于管理所有的 Journal
-2. recoverUnfinalizedSegments  查找 edit 和 edits_inprogress 相关的文件. 然后将 edits_inprogress 重命名为 edit 文件. 第一次启动并没有任何 edit 文件.
+2. recoverUnfinalizedSegments  查找 edit 和 edits_inprogress 相关的文件. 然后将 edits_inprogress 重命名为 edit 文件.
+
+  注意: 第一次启动并没有任何 edit 文件.
 
 ### loadFSImageFile
 
@@ -52,22 +66,22 @@ FSImageTransactionalStorageInspector 主要作用是
 
 NameNodeRpcServer 实现了 NameNode 所需要的 RPC 协议. 如
 
-RPC 对象 |  RPC 协议
+RPC 实体 |  RPC 协议
 ----|-----
 client | ClientProtocol
 datanode | DatanodeProtocol, DatanodeLifelineProtocol
 secondary namenode | NamenodeProtocol
 
-其中每一种具体的协议接口都有一个对应的实现类， 如 ClientNamenodeProtocolServerSideTranslatorPB -> DatanodeProtocolPB, 当生成 ClientNamenodeProtocolServerSideTranslatorPB 对象时， 传入了DatanodeProtocol的真正的实现也就是 NameNodeRpcServer. 所有的 API 最后都会回调 NameNodeRpcServer.
+其中每一种具体的协议接口都有一个对应的实现类， 如 ClientNamenodeProtocolServerSideTranslatorPB -> DatanodeProtocolPB, 当生成 ClientNamenodeProtocolServerSideTranslatorPB 对象时， 传入了DatanodeProtocol的实现类也就是 NameNodeRpcServer. 所有的 API 最终都会回调 NameNodeRpcServer.
 
-NameNodeRpcServer 当收到 API 请求时， NameNodeRpcServer 利用 NameNode, FsNameSpace等完成相关的功能.
+NameNodeRpcServer 当收到 API 请求时， NameNodeRpcServer 利用 NameNode, FSNamesystem 等完成相关的功能.
 
 ``` java
-  public DatanodeProtocolServerSideTranslatorPB(DatanodeProtocol impl, //impl -> NameNodeRpcServer
-      int maxDataLength) {
-    this.impl = impl;
-    this.maxDataLength = maxDataLength;
-  }
+public DatanodeProtocolServerSideTranslatorPB(DatanodeProtocol impl, //impl -> NameNodeRpcServer
+    int maxDataLength) {
+  this.impl = impl;
+  this.maxDataLength = maxDataLength;
+}
 ```
 
 1. NameNodeRpcServer 通过 `fs.defaultFS` 获得 NameNode server 地址.
@@ -84,7 +98,7 @@ NameNodeRpcServer 当收到 API 请求时， NameNodeRpcServer 利用 NameNode, 
   
   FSNameSystem 创建 NameNodeResourceChecker 检查 edits 目录所在的 volume是否有可用空间
 
-  - 启动一个进程执行 **df -k -P ~/bigdata/hadoop/dfs/name** 获得 **volume=/dev/nvme0n1p2**
+  - a) 启动一个进程执行 **df -k -P ~/bigdata/hadoop/dfs/name** 获得 **volume=/dev/nvme0n1p2**
   
   ``` console
   $ df -k -P ~/bigdata/hadoop/dfs/name
@@ -92,21 +106,21 @@ NameNodeRpcServer 当收到 API 请求时， NameNodeRpcServer 利用 NameNode, 
   /dev/nvme0n1p2   490691512 312122100 153573932      68% /
   ```
 
-  - 检查 volume 的剩余可用空间是否大于 **dfs.namenode.resource.du.reserved**的设定值默认 100M
+  - b) 检查 volume 的剩余可用空间是否大于 **dfs.namenode.resource.du.reserved** 的设定值(默认 100M)
   
 - BlockManager.active
   
-  激活 BlockManager, 也就是开启一系列服务线程, 如图中的绿色的框
+  激活 BlockManager, 开启一系列服务线程, 如图中的绿色的框
 
   - BlockManagerSafeMode.active
   
-  最后初始化 safemode 相关的信息. 通过 BlocksMap 获得当前的 block 数量并减去 LeaseManager 中当前正在构建的 Block 数量. 当 **blocksafe > blockThreshold** 时，进入 safemode.
+    最后初始化 safemode 相关的信息. 通过 BlocksMap 获得当前的 block 数量并减去 LeaseManager 中当前正在构建的 Block 数量. 当 **blocksafe > blockThreshold** 时，进入 safemode.
 
-  BlockManagerSafeMode|
-  -----|-----
-  blockTotal | total blocks - under construction blocks
-  blockThreshold | safemode threshold, 由**dfs.namenode.safemode.threshold-pct**指定，默认为 blockTotal*0.999
-  blockSafe | safe block 的数量
+    BlockManagerSafeMode|
+    -----|-----
+    blockTotal | total blocks - under construction blocks
+    blockThreshold | safemode threshold, 由**dfs.namenode.safemode.threshold-pct**指定，默认为 blockTotal*0.999
+    blockSafe | safe block 的数量
 
 ### start rpc
 
@@ -114,7 +128,7 @@ NameNode rpc 开始工作
 
 ## startActiveServices
 
-NameNode在初始化之间会创建一个 HAState, 没有开启 HA 模式时， 默认会创建 ActiveState. 在 NameNode 初始化后， NameNode 进入 Active Stage, 并启动一些仅当 Active Stage 时才能开启的服务线程. 如,
+NameNode在初始化之前会创建一个 HAState. 当没有开启 HA 模式时， 默认会创建 ActiveState, 在 NameNode 初始化后， NameNode 进入 Active Stage, 并启动一些仅当是 **Active Stage** 时才开启的服务线程. 如,
 
 service |
 ----- | -----
