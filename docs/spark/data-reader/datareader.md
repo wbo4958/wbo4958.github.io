@@ -5,9 +5,18 @@ nav_order: 5
 parent: Spark 
 ---
 
+# Spark Data Reader
+{: .no_toc}
+
 Spark 定义了 Data Source API 去处理各种各样的数据存储系统. 目前在 Spark 3.1.1 中存在两种Data Source API, 分别为 V1 和 V2. 至于 V2 引入的时间和原因, 可以参考这个 video [Apache Spark Data Source V2](https://databricks.com/session/apache-spark-data-source-v2)
 
 本文通过运行一段 spark 读文件代码来学习 Spark 3.1.1 中关于 Data Reader的过程.
+
+## 目录
+{: .no_toc .text-delta}
+
+1. TOC
+{:toc}
 
 ## 示例代码
 
@@ -138,7 +147,7 @@ cachedLeafFiles: mutable.LinkedHashMap[Path, FileStatus]| 扫描后缓存到 lea
 cachedLeafDirToChildrenFiles: Map[Path, Array[FileStatus]]| dir -> leafs_of_dir
 cachedPartitionSpec: PartitionSpec| 如果用户没有指定, infer PartitionSpec
 
-#### 推断 PartitionSpec
+- 推断 PartitionSpec
 
 当用户没有指定 userSpecifiedPartitionSpec 时, InMemoryFileIndex 根据 leafDirs 推断中 PartitionSpec, 具体可以参考 [这里](https://github.com/apache/spark/blob/v3.1.1-rc1/sql/core/src/main/scala/org/apache/spark/sql/execution/datasources/PartitioningUtils.scala#L95).
 
