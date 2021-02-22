@@ -5,7 +5,16 @@ nav_order: 5
 parent: HDFS
 ---
 
-本文通过学习 NameNode format 的整个流程来了解 NameNode 的目录结构以及相关文件内容.
+# NameNode 格式化
+{: .no_toc }
+
+本文通过学习 NameNode format 的整个流程来了解 NameNode 的目录结构以及相关文件内容. 本文基于 hadoop/branch-3.3.0
+
+## 目录
+{: .no_toc .text-delta}
+
+1. TOC
+{:toc}
 
 ## format overview
 
@@ -25,7 +34,7 @@ format 默认是交互式，但也可以强制进行格式化，即
 hdfs namenode -format -force
 ```
 
-### format 创建的相关类
+## format 相关类
 
 namenode format 并不会创建 NameNode 类，但它会创建很多相关辅助类比如 FSImage, NNStorage 等来达到 format 的目的.
 
@@ -37,7 +46,7 @@ namenode format 并不会创建 NameNode 类，但它会创建很多相关辅助
 - StorageDirectory 表示一个具体的文件夹
 - NNStorageRetentionManager 管理着 checkpoint 和 edit log 数量.
 
-### namenode 相关目录的配置文件
+## namenode 相关目录的配置文件
 
 ---|---
 **配置**|
@@ -47,7 +56,7 @@ dfs.namenode.edits.dir        | editlog 的目录
 
 如果没有设置 `dfs.namenode.name.dir`, namenode目录地址默认为 **${hadoop.tmp.dir}/dfs/name**. 整个 edits 的地址由 **dfs.namenode.shared.edits.dir** + **dfs.namenode.edits.dir**, 如果这两个都没有设置, 则默认为 **dfs.namenode.name.dir** 所指定的地址.
 
-### namenode format 步骤
+## namenode format 步骤
 
 1. 删除 ${dfs.namenode.name.dir}/current 下所有的文件
 2. 创建 ${dfs.namenode.name.dir}/current 目录
@@ -57,7 +66,7 @@ dfs.namenode.edits.dir        | editlog 的目录
 
 更多的文件介绍可以参考[这里](https://docs.cloudera.com/runtime/7.2.0/data-protection/topics/hdfs-namenodes.html)
 
-### fsimage 中的内容
+## fsimage 中的内容
 
 - saveNameSystemSection
   
