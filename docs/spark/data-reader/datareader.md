@@ -250,3 +250,58 @@ PhysicalPlan 生成最后的 RDD. 对于 Row-wised 的 PhysicalPlan 通过 doExe
 不管是 v1 最后生成的 FileSourceRDD 还是 v2 生成的 DataSourceRDD, 当 `spark.sql.parquet.enableVectorizedReader` 打开时 (默认为true), 则创建 VectorizedParquetRecordReader 读取 Parquet 文件返回 ColumnBatch, 反之创建 ParquetRecordReader 返回 InternalRow.
 
 ![rdd-read](/docs/spark/data-reader/datareader-rdd-read.svg)
+
+## Filters PushDown (谓词下推)
+
+谓词下推在不影响结果的情况下，尽量将过滤条件下移到离数据源最近的地方，这样可以过滤掉很多不用的数据.
+
+file| math meta
+----|----
+class=1/xxx.parquet|`math: INT32 SNAPPY DO:0 FPO:267 SZ:81/79/0.98 VC:7 ENC:PLAIN,BIT_PACKED,RLE ST:[min: 65, max: 99, num_nulls: 0]`
+class=2/xxx.parquet|`math: INT32 SNAPPY DO:0 FPO:332 SZ:98/96/0.98 VC:12 ENC:PLAIN,BIT_PACKED,RLE ST:[min: 12, max: 98, num_nulls: 1]`
+class=3/xxx.parquet|`math: INT32 SNAPPY DO:0 FPO:316 SZ:93/95/1.02 VC:11 ENC:PLAIN,BIT_PACKED,RLE ST:[min: 34, max: 98, num_nulls: 0]`
+
+Parquet 文件的 meta 信息保存了 STATISTIC 信息， 如一个 column 的最大值和最小值.
+
+可以看到
+
+file| math min | math max
+----|----      | -----
+class=1/xxx.parquet|65| 99
+class=2/xxx.parquet|12| 98
+class=3/xxx.parquet|34| 98
+
+如果查询条件加上 math < 50, 那其实只需要读取 class=2 和 class=3 中的文件即可. 如果需要查询 class!=3 班上的(也就是class=1和class=2)， 那更确定只有 class2/xxx.parquet 里的数据才满足条件, 事实上 Spark 确实是这么做的.
+
+``` scala
+val df = spark.read.format("parquet").schema(schema).load(resource1).toDF().where("math < 50 and class != 3")
+```
+
+从 [InMemoryFileIndex](#inmemoryfileindex) 可知, InMemoryFileIndex 保存了所有的输入文件信息. 但有些文件可能 filter 条件下并不需要， 因此可以去除掉. 而 InMemoryFileIndex (FileIndex) 提供 listFiles
+
+``` scala
+def listFiles(partitionFilters: Seq[Expression], dataFilters: Seq[Expression]): Seq[PartitionDirectory]
+```
+
+listFiles 接收 partitionFilers(class != 3) 与 dataFilters (match < 50) 返回过滤后的结果. InMemoryFileIndex 已经推断中 PartitionSpec, 只需要过滤掉 class！=3 的文件夹即可， listFiles 只返回 `class=1/xxx.parquet 和 class=2/xxx.parquet`. InMemoryFileIndex.listFiles 并没有使用 dataFilters 且 在 driver 端调用.
+
+当 Spark task 准备读取 Parquet 文件时先读取 BlockMetaData 信息， 然后根据 data filters 过滤到不需要的 Row Group, 返回有用的 Row Group. 具体是在 `filterRowGroups`.
+
+可以参考 [Parquet的那些事（一）基本原理](https://blog.csdn.net/zwgdft/article/details/104582229)
+
+``` console
+== Physical Plan ==
+*(1) Project [name#0, number#1, math#2, class#3]
++- *(1) Filter (isnotnull(math#2) AND (math#2 < 33))
+   +- *(1) ColumnarToRow
+      +- FileScan parquet [name#0,number#1,math#2,class#3] Batched: true,
+          DataFilters: [isnotnull(math#2), (math#2 < 33)], Format: Parquet,
+          Location: InMemoryFileIndex[file:/home/bobwang/tools/spark-data/student-parquet],
+          PartitionFilters: [isnotnull(class#3), NOT (class#3 = 3)],
+          PushedFilters: [IsNotNull(math), LessThan(math,33)],
+          ReadSchema: struct<name:string,number:int,math:int>
+```
+
+可以看到 PushedFilters 确实是 push 到 FileScanRDD 中了.
+
+注意: 这里依然是有个  Filter physical plan 的， 并不是说 filter pushdown了就不需要再进行 filter 了， 以本例来说， Parquet 文件是以 Row Group 单位来读取的， 这里面有些数据依然不符合要求， 所以依然需要 filter 掉. 但是 filter pushdown 后， 从原来的需要读取 3 个文件 到最后只需要读取 1 个文件了， 大大减少了输入数据.
