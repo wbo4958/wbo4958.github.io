@@ -245,4 +245,8 @@ PhysicalPlan 生成最后的 RDD. 对于 Row-wised 的 PhysicalPlan 通过 doExe
 
   对于 v2. PartitionReaderFactory 通过 createColumnarReader 或 createReader 创建计算函数.
 
+## RDD read
+
+不管是 v1 最后生成的 FileSourceRDD 还是 v2 生成的 DataSourceRDD, 当 `spark.sql.parquet.enableVectorizedReader` 打开时 (默认为true), 则创建 VectorizedParquetRecordReader 读取 Parquet 文件返回 ColumnBatch, 反之创建 ParquetRecordReader 返回 InternalRow.
+
 ![rdd-read](/docs/spark/data-reader/datareader-rdd-read.svg)
