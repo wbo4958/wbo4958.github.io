@@ -22,7 +22,9 @@ theme: "just-the-docs"
 
 color_scheme: emerald
 
-#aux_links: TODO
+aux_links:
+  "submit issues":
+    - "https://github.com/wbo4958/wbo4958.github.io/issues/new"
 
 plugins:
   - jekyll-optional-front-matter # GitHub Pages
