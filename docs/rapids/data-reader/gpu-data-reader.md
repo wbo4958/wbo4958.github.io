@@ -8,7 +8,7 @@ parent: Spark-Rapids
 # Spark GPU Data Reader
 {: .no_toc}
 
-本文承接 [Spark CPU Data Reader](../../spark/data-reader/datareader.md) 介绍 Rapids 库是怎样利用 GPU 加速 Spark 的文件读取. 本文基于 [Rapids](https://github.com/NVIDIA/spark-rapids) branch 0.4.0
+本文承接于 [Spark CPU Data Reader](../../spark/data-reader/datareader.md), 介绍 Rapids 库是怎样利用 GPU 加速 Spark 的文件读取. 本文基于 [Rapids](https://github.com/NVIDIA/spark-rapids) branch 0.4.0
 
 ## 目录
 {: .no_toc .text-delta}
@@ -41,7 +41,7 @@ parent: Spark-Rapids
   reader type||
   -----|------
   PERFILE | 串行读取读取每个文件，每读完一个文件交给 GPU decode
-  COALESCING | 适用于数据在本地的场景, 并行读取所有的文件合并成, 然后再交给 GPU decode
+  COALESCING | 适用于数据在本地的场景, 并行读取**所有的文件**合并成一个大的Parquet格式buffer, 然后再交给 GPU decode
   MULTITHREADED | 适用于数据在 Cloud 的环境中. Rapids 并行的读取每个文件，再依次将读取的每个文件交给 GPU decode. 这样可以达到很高的吞吐量.
 
   PERFILE和MULTITHREADED 会产生多个 ColumnarBatch, 每个 ColumnarBatch 数据量比较少，很难充分利用 GPU 性能。 而COALESCING 将小而多的文件合并成大的文件交给 GPU 处理会比较充分利用 GPU 的优势。
@@ -82,11 +82,11 @@ parent: Spark-Rapids
 
 比如一个 Parquet 文件时有 10 个 row group, 每一次只需要读取 5 个 row group并生成只有这 5 个 row group 的 parquet 文件, 这个文件不会落盘，存储在 CPU memory 里。 最后将该 memory 拷到 GPU 上解析.
 
-## GPU 如何组装 Partition 字段
+## GPU 如何组装 Partition 列
 
 - 不需要合并的情况
 
-  对于不同的 reader, 组装 Partition 字段不相同， 比如对于 PERFILE 和 MULTITHREADED 这两种类型的 reader, 它们都是以文件单位进行读取，不同的文件之间是不会合并的, 因此对于它们，只需要知道他们的 Partition Value, 然后再创建相应的列，并填充 Partition Value 即可. 而每个文件包括 Partition的值保存在 PartitionedFile 里.
+  对于不同的 reader, 组装 Partition 列不相同， 比如对于 PERFILE 和 MULTITHREADED 这两种类型的 reader, 它们都是以文件单位进行读取，不同的文件之间是不会合并的, 因此对于它们，只需要知道他们的 Partition Value, 然后再创建相应的列，并填充 Partition Value 即可. 而每个文件信息以及Partition的值保存在 PartitionedFile 里.
 
   比如
 
@@ -116,3 +116,26 @@ parent: Spark-Rapids
   5. 最后 Data columns 与 Partition column 合并成一个 ColumnarBatch
 
   ![fill partition](/docs/rapids/data-reader/datareader-fill_partition.svg)
+
+## Multi Files 读取是怎么工作的？
+
+- multithreaded reading
+
+  ![multithreaded-reader](/docs/rapids/data-reader/datareader-multithreaded.svg)
+  
+  如图所示, multithreaded reading方式会为每个文件产生一个 ColumnarBatch, 当然如果一个文件很大, row group很多， 那会产生更多的 ColumnarBatch.
+
+- coalesing reading
+
+  ![coalesing-reader](/docs/rapids/data-reader/datareader-coalescing.svg)
+  
+  如图所示, coalesing reading 会将多个文件合并只产生很少的 ColumnarBatch.
+
+Rapids 提供了两个参数控制 ColumnarBatch 的大小
+
+configuration | |default value
+---|---|---
+spark.rapids.sql.reader.batchSizeRows | ColumnarBatch 最大的行数 |2G
+spark.rapids.sql.reader.batchSizeBytes | ColumnarBatch 最大的size |2G
+
+注意: parquet文件以 row group 为单位进行读取. 比如一个 Parquet 文件有3个 row groups, 第一个 row groups 有 1.2G 行，第二个 1.0G 行， 第三个 0.3G行，那该文件会产生 2个 ColumnarBatch. 第一个ColumnarBatch读取第一个 row groups (1.2G行), 第二个 ColumnarBatch 读取 第二个和第三个 row group共 1.3G行. 
