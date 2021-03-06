@@ -84,7 +84,41 @@ BPServiceActor 会开启两个线程， 一个线程与 NN 通信， 另一个�
   BlockPool 已经与 NN handshake 了，通知 DataNode 初始化 BlockPool.
 
 - **Step 8: register Datanode**
-- **Step 9: BPServiceActor offer service**
-- **Step 10: 往 NN 发送 heartbeat**
-- **Step 11: blockReport**
+  
+  创建 DatanodeRegistration 类,该类包含了 NN 需要的所有的注册信息.
+
+  DatanodeRegistration | |
+  -----|-----
+  ipAddr/hostName| NN的ip与host信息
+  xferPort/xferAddr| data streaming 信息
+  infoPort| info server 的商品
+  ipcPort| ipc端口
+  datanodeUuid| datanode uuid
+  storageInfo|BlockPoolSliceStorage 信息
+
+- **Step 9 - Step 11: BPServiceActor offerService**
+  
+  offerService 进入死循环, 主要做以下事情  
+  
+  1. 向 NN 发送心跳
+
+      发送心跳的间隔由 dfs.heartbeat.interval控制, 默认为 3s. 心跳的 workloads 包括每个 Volume 上的 StorageReport
+      StorageReport ||
+      ---|---
+      failed|
+      capacity| volume 的 capacity
+      dfsUsed| volume 中所有的 BlockPoolSlice 使用之和
+      nonDfsUsed| 非 dfs 使用的空间, 包括 reserve 的空间
+      remaining|剩下可用空间
+      blockPoolUsed| 当前 BlockPoolSlice使用的空间
+
+      以及 VolumeFailureSummary/SlowPeerReports/SlowDiskReports 相关信息.
+
+      最后还包括一些 cache capacity以及 cache used 信息
+
+  2. 向 NN 发送 IBRs
+  3. 向 NN 发送 block 信息
+
 - **Step 12: BPServiceActor 处理命令**
+  
+  当 DN 往 NN 进行 RPC 后，返回 DatanodeCommand, BPServiceActor 将这些命令丢给 CommandProcessingThread 接着处理.
