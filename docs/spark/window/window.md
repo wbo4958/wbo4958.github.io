@@ -165,3 +165,6 @@ def testUnboundedWindowFunctionFrame(spark: SparkSession) = {
   这里的 Executed Plan 并没有加入 WholeStage, 在 SparkPlan 中, WindowExec 的 requiredChildDistributiono为ClusteredDistribution, 而 WindowExec 的 child 为 LocalTableScanExec 的输出并不符合 distribution 要求， 因此需要加入 ShuffleExchangeExec, 同理 requiredChildOrdering 也不符合要示， 也需要加入 SortExec, 这里是 local sort, 并不需要 global 的sort.
 
   **ClusteredDistribution** 会创建 HashPartitioning, 而需要进行 hash 计算的即是 WindowExec中的 partitionSpec列.
+
+
+  ![xxx](/docs/spark/window/window_frame.gif)
