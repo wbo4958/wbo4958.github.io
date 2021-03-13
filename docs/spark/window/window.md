@@ -10,8 +10,6 @@ parent: Spark
 
 本文通过代码学习 Spark 中 window 函数的实现. 本文基于 Spark 3.1.1.
 
-[window function](https://spark.apache.org/docs/latest/sql-ref-syntax-qry-select-window.html)
-
 ## 目录
 {: .no_toc .text-delta}
 
@@ -72,7 +70,7 @@ def testUnboundedWindowFunctionFrame(spark: SparkSession) = {
 
 - Logical Plan
   
-  所有的 window 相关的表达都记录在 **Project** 新增加的列.
+  所有的 window 相关的表达式都记录在 **Project** 新增加的列的表达式中, 即 Alias 中.
 
 - Analyzed Plan
   
@@ -162,9 +160,71 @@ def testUnboundedWindowFunctionFrame(spark: SparkSession) = {
 
 - Executed Plan
   
-  这里的 Executed Plan 并没有加入 WholeStage, 在 SparkPlan 中, WindowExec 的 requiredChildDistributiono为ClusteredDistribution, 而 WindowExec 的 child 为 LocalTableScanExec 的输出并不符合 distribution 要求， 因此需要加入 ShuffleExchangeExec, 同理 requiredChildOrdering 也不符合要示， 也需要加入 SortExec, 这里是 local sort, 并不需要 global 的sort.
+  这里的 Executed Plan 并没有加入 WholeStage, 在 SparkPlan 中, WindowExec 的 partitionSpec 不为空时, requiredChildDistribution 为ClusteredDistribution, 而 WindowExec 的 child 为 LocalTableScanExec 的输出并不符合 distribution 要求， 因此需要加入 ShuffleExchangeExec, 同理 requiredChildOrdering 也不符合要示， 也需要加入 SortExec, 这里是 local sort, 并不需要 global 的sort, 也就是 partition 内要求排序, partition 间不需要进行排序.
 
   **ClusteredDistribution** 会创建 HashPartitioning, 而需要进行 hash 计算的即是 WindowExec中的 partitionSpec列.
 
+## Window operator 的数据驱动
 
-  ![xxx](/docs/spark/window/window_frame.gif)
+Window operator 在 child 的 rdd 上做了一次 mapPartitions 操作. 从上面的 executed plan 可以看出, WindowExec 的输入也就是 child (SortExec) 的输出是 partition 间排序的, 如下所示
+
+``` console
++-------+-----+------+
+|depName|empNo|salary|
++-------+-----+------+
+|AAA    |4    |4800  |
+|AAA    |3    |4800  |
+|AAA    |1    |5000  |
+|BBB    |5    |3500  |
+|BBB    |2    |3900  |
+|CCC    |11   |5200  |
+|CCC    |10   |5200  |
+|CCC    |9    |4500  |
+|CCC    |8    |6000  |
+|CCC    |7    |4200  |
++-------+-----+------+
+```
+
+那我们来看下 window operator 是怎么进行数据驱动的.
+
+![data-driven](/docs/spark/window/window-data-driven.svg)
+
+其中
+
+- buffer: ExternalAppendOnlyUnsafeRowArray
+- bufferIterator: buffer.generateIterator()
+- windowFunctionResult: InternalRow 表示 window 函数在 window frame 中的计算结果
+- frame: 一个 WindowFunctionFrame 用于计算 window frame 里的多个 window 函数的值.
+
+大致工作流程如下:
+
+next 函数一次将同一个 group 或 partition 的数据通过 child 的 iterator 读取出来放到 buffer 中. 如图中所示， window operator 处理第一个 group (AAA), 会将所有 AAA 的行读到 buffer 中，此时 buffer 中的数据为 `AAA,1,5000`, `AAA,3,4800`, `AAA,4,4800`. 然后将 buffer 扔给 frame.prepare， 然后通过 `bufferIterator=buffer.generateIterator()` 生成 buffer 的 iterator.
+
+next 函数通过 bufferIterator 获得当前需要被处理的行, 然后将该行的数据扔给 frame.write 去计算， frame计算的结果保存到 windowFunctionResult 中.
+
+最后将 当前处理的行与windowFunctionResult join 起来成为最终的结果.
+
+## WindowFunctionFrame 的种类
+
+Spark 3.1.1 中实现了 7 种不同的 WindowFunctionFrame 用于优化不同的场景.
+
+![window function frame](/docs/spark/window/window-WindowFuncFrame.svg)
+
+如图所示, 根据 window 函数的类型, 以及 WindowFrame 的 lower/upper 来决定最终选择哪个 WindowFunctionFrame 来实现.Window 函数分为两种，一种是利用 Aggregation 的函数如 Sum/Max/Min, 另一种是自定义的 Window Function, 如下所示.
+
+![window function](/docs/spark/window/window-windowfunction.svg)
+
+WindowFunctionFrame 的实现，以 UnboundedWindowFunctionFrame 为例，该 UnboundedWindowFunctionFrame 中 lower/upper 都是无界，也就是说 window frame 是无界的，也就是每行的 window frame都一行，包含所有的数据。所以只需要计算一次，没必要为每行都计算.
+
+下面来看下 SlidingWindowFunctionFrame 的实现方式.
+
+![Slide window function frame](/docs/spark/window/window_frame.gif)
+
+## Window Frame 类型
+
+目前 Window Frame 分类 RowFrame 与 RangeFrame, 它们不同的是 lower 和 upper 表示的内容不同， RowFrame, lower/upper 表示相对于 当前行的行偏移， 而 RangeFrame 是针对当前行中 order by那列的值的偏移。
+
+## 参考
+
+- [window function](https://spark.apache.org/docs/latest/sql-ref-syntax-qry-select-window.html)
+- [spark-window-function](https://knockdata.github.io/spark-window-function/)
