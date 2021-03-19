@@ -38,6 +38,95 @@ Spark 支持多种集群的 deploy, 包括 Standalone, Yarn, Kubernets, Mesos, �
 
 用户程序, 主要是对于用户隐藏的 SparkContext, **每个 Application 只有一个 SparkContext**. 它负责往 Master 中注册 Application, 并接收 Executor 的注册, 接着调度Task, 将 Task 发送到 Executor 端执行, 并接收 Task 运行后的结果返回给用户.
 
+## Worker 资源
+
+在 Spark Standalone Worker中, 资源是 cpu cores/ memory 和其它硬件如 GPU/ FPGA等的虚拟资源，并不是获得真实的cpu, 只是一种计算单位. Worker 在初始化时都会设置可用资源.
+
+- cores
+  
+  用户可以通过 SPARK_WORKER_CORES 设置 worker 可用的 cpu cores, 如果没有设置， worker 会使用系统中物理 cpu cores 作为 worker的 cores 资源.
+
+- memory
+
+  用户可以通过 SPARK_WORKER_MEMORY 设置 worker 可用的 memory, 如果没有设置， worker 会使用系统中物理内存 - 1G 作为 worker 的 memory 资源.
+
+- GPU 资源, FPGA资源一样
+
+  对于 GPU 资源，有两种方式指定, 一种是事先分配，另一种是写代码动态发现.
+
+  - Allocated
+  
+    该方式主要是通过 spark.worker.resourcesFile 指定的配置文件来事先分配给该 worker 相关资源
+
+    如创建 gpu_fpga_conf.json 文件, 内容如下
+
+    ``` json
+    [
+      { 
+        "id": {
+          "componentName": "spark.worker",
+          "resourceName": "gpu"
+        },
+        "addresses": [
+          "0",
+          "1"
+        ]
+      },
+      { 
+        "id": {
+          "componentName": "spark.worker",
+          "resourceName": "fpga"
+        },
+        "addresses": [
+          "f1",
+          "f2",
+          "f3"
+        ]
+      }
+    ]
+    ```
+
+  - Discovery
+
+    该方式主要是通过 spark.worker.resource.gpu.discoveryScript 指定的脚本在 runtime 时动态发现相关资源.
+
+    创建 getGpuResources.sh
+
+    ``` bash
+    # Example output: {"name": "gpu", "addresses":["0","1","2","3","4","5","6","7"]}
+
+    ADDRS=`nvidia-smi --query-gpu=index --format=csv,noheader | sed -e ':a' -e 'N' -e'$!ba' -e 's/\n/","/g'`
+    echo {\"name\": \"gpu\", \"addresses\":[\"$ADDRS\"]}
+    ```
+  
+  Worker 在启动过程中通过 setupWorkerResources 函数来获得相关资源
+
+  ``` scala
+  private def setupWorkerResources(): Unit = {
+    try {
+      resources = getOrDiscoverAllResources(conf, SPARK_WORKER_PREFIX, resourceFileOpt)
+      logResourceInfo(SPARK_WORKER_PREFIX, resources)
+    } catch {
+      // ...
+    }
+    resources.keys.foreach { rName =>
+      resourcesUsed(rName) = MutableResourceInfo(rName, new HashSet[String])
+    }
+  }
+
+  def getOrDiscoverAllResources(
+      sparkConf: SparkConf,
+      componentName: String,
+      resourcesFileOpt: Option[String]): Map[String, ResourceInformation] = {
+    val requests = parseAllResourceRequests(sparkConf, componentName)
+    val allocations = parseAllocatedOrDiscoverResources(sparkConf, componentName, resourcesFileOpt)
+    assertAllResourceAllocationsMeetRequests(allocations, requests)
+    val resourceInfoMap = allocations.map(a => (a.id.resourceName, a.toResourceInformation)).toMap
+    resourceInfoMap
+  }
+  ```
+  
+
 ## Standalone Deploy
 
 ![standalone deploy](/docs/spark/standalone/standalone-deploy.svg)
@@ -48,7 +137,7 @@ Spark 支持多种集群的 deploy, 包括 Standalone, Yarn, Kubernets, Mesos, �
 
 **step 2:**
 
-- 
+- Worker 启动后会设置 worker 所有的资源.
 
 **step 2 - step 4**
 
