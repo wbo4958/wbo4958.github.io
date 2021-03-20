@@ -222,7 +222,15 @@ WindowFunctionFrame 的实现，以 UnboundedWindowFunctionFrame 为例，该 Un
 
 ## Window Frame 类型
 
-目前 Window Frame 分类 RowFrame 与 RangeFrame, 它们不同的是 lower 和 upper 表示的内容不同， RowFrame, lower/upper 表示相对于 当前行的行偏移， 而 RangeFrame 是针对当前行中 order by那列的值的偏移。
+目前 Window Frame 分类 RowFrame 与 RangeFrame, 它们不同的是 lower 和 upper 表示的内容不同.
+
+- RowFrame
+
+  lower/upper 表示相对于 当前行的行偏移. RowFrame 没有要求 OrderBy 列, 但是一些特殊的 lag/lead/nth_value 要求 OrderBy
+
+- RangeFrame
+
+  是针对当前行中 OrderBy 那列的值的偏移. RangeFrame 要求 WindowSpec 指定 OrderBy 列.
 
 ## 参考
 
