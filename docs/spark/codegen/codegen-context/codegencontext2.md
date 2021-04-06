@@ -9,7 +9,7 @@ grand_parent: Spark
 # Spark CodeGen Context 辅助函数
 {: .no_toc}
 
-本文基于 Spark 3.1.1.
+本文学习 CodegenContext 用于生成代码的几个函数。 本文基于 Spark 3.1.1.
 
 ## 目录
 {: .no_toc .text-delta}
@@ -17,9 +17,7 @@ grand_parent: Spark
 1. TOC
 {:toc}
 
-## CodegenContext 函数
-
-### genEqual
+## genEqual
 
 生成 equal expression 的代码
 
@@ -41,7 +39,7 @@ genEqual 根据 datatype 不同，生成的 "equal" 代码也不相同
 
 对于 StructType 和 ArrayType 调用 getComp 生成代码.
 
-### genComp
+## genComp
 
 ``` scala
 def genComp(dataType: DataType, c1: String, c2: String): String
@@ -158,7 +156,7 @@ def genComp(dataType: DataType, c1: String, c2: String): String
     }
     ```
 
-### genCreater
+## genCreater
 
 ``` scala
 def genGreater(dataType: DataType, c1: String, c2: String)
@@ -169,7 +167,7 @@ def genGreater(dataType: DataType, c1: String, c2: String)
 - 对于 byte/short/int/long, 生成代码 `c1 > c2`
 - 对于其它类型, 调用 genComp 生成相关代码
 
-### genExpressions
+## genExpressions
 
 ``` scala
 def generateExpressions(
