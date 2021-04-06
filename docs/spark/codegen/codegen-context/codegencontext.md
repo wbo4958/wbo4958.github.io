@@ -1,6 +1,6 @@
 ---
 layout: page
-title: Codegen Context
+title: Codegen生成类元素
 nav_order: 5
 parent: Codegen
 grand_parent: Spark
@@ -9,7 +9,7 @@ grand_parent: Spark
 # Spark CodeGen Context
 {: .no_toc}
 
-本文基于 Spark 3.1.1.
+本文主要是学习 CodegenContext 在生成代码的过程中，所涉及到的相关变量以及意义, 本文基于 Spark 3.1.1.
 
 ## 目录
 {: .no_toc .text-delta}
@@ -85,7 +85,7 @@ grand_parent: Spark
 
   最终生成的结果为 `boolean expr1_isNull = false;`
   
-## 生成类
+## CodegenContext
 
 CodegenContext 是 codegen 的上下文, 用于保存生成的类的成员变量，函数，内部类等等.
 
@@ -97,6 +97,7 @@ CodegenContext 是 codegen 的上下文, 用于保存生成的类的成员变量
 - 生成变量名
 
   为了防止出现变量名相同的情况, CodegenContext 使用下面的变量来记录
+
   | 相关变量 | |
   ---|---|
   **freshNameIds**: mutable.HashMap[String, Int] | 保存相同变量名与其对应的个数
