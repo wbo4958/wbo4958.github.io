@@ -99,11 +99,12 @@ private val extraOptions = new scala.collection.mutable.HashMap[String, String]
         HadoopFsRelation字段 ||
         ------------ | -------------
         location: FileIndex | 一个接口用来枚举出所有的源文件path,以及分区
-        partitionSchema: StructType | 用于分区的列 schema
-        dataSchema: StructType | 需要读取的列 schema
+        partitionSchema: StructType | 用于分区的列的 schema
+        dataSchema: StructType | 非partition列, 也就是保存在文件中的数据列 schema
         bucketSpec: Option[BucketSpec] | 描述是否是 bucketing ?
         fileFormat: FileFormat | V1 的 FileFormat 用于读写文件
         options: Map[String, String] | 用来读写数据的配置项,也就是 DataFrameReader 里的 extraOptions
+        schema: StructType | 整个 relation 的 schema = mergeSchema(partitionSchema + dataSchema)
 
      - 对于 v2, 通过 getTable 获得 Table, 并创建 DataSourceV2Relation.
 
@@ -112,7 +113,7 @@ private val extraOptions = new scala.collection.mutable.HashMap[String, String]
         FileTable字段 ||
         ------------ | -------------
         **fileIndex: PartitioningAwareFileIndex** | 也主是可以识别分区的FileIndex
-        dataSchema: StructType| 需要读取的列 schema
+        dataSchema: StructType|  非partition列, 也就是保存在文件中的数据列 schema
         schema: StructType | 整个 Table 的 schema
         String name() | table的名字
         Transform[] partitioning() | fileIndex.partitionSchema.names.toSeq.asTransforms
