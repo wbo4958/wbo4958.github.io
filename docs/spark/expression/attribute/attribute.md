@@ -38,13 +38,32 @@ def qualifier: Seq[String] // optional, 包含一些限定信息如 catalog, dat
 def metadata: Metadata
 ```
 
-- UnresolvedAttribute
+- UnresolvedAttribute 继承于 Attribute 和 Unevaluable
   
-  保存着尚未解析的属性的名称. 因为没有解析，它也就没有 exprId, dataType 等等
+  保存着尚未解析的属性的名称. 因为没有解析，它也就没有 exprId, dataType 等等. 且 UnresolvedAttribute 是不可计算的
 
-- AttributeReference
+- AttributeReference 继承于 Attribute 和 Unevaluable
 
-  UnresolvedAttribute 解析过后变成了 AttributeReference, 它表示绑定到某个 operator 输出的某个属性, 既然它已经是被解析过的，那它就有确定的 dataType, nullable, exprId 等
+  UnresolvedAttribute 解析过后变成了 AttributeReference, 它表示绑定到某个 operator 输出的某个属性, 既然它已经是被解析过的，那它就有确定的 dataType, nullable, exprId 等. 且 AttributeReference 是不可计算的
+
+### AttributeSeq
+
+AttributeSeq 是一个隐式类， 它会将 Seq[Attribute] 转换为 AttributeSeq.
+
+``` scala
+val input: AttributeSeq = Seq('a.int, 'b.int)
+```
+
+| AttributeSeq | |
+|----| ---- |
+| val attrs: Seq[Attribute] | |
+| def toStructType: StructType | Attributes 转换为 StructType |
+| val exprIdToOrdinal | Attribute exprId 与 Attribute 所在的 Seq 里的位置的映射 |
+| def indexOf(exprId: ExprId): Int | 根据 exprId 找到 对应的 位置  |
+| val direct: Map[String, Seq[Attribute]] | name 与 Attribute 的映射 |
+| val qualified: Map[(String, String), Seq[Attribute]] | 两个限定符与 Attribute 的映射 |
+| val qualified3Part: Map[(String, String, String), Seq[Attribute]] | 三个限定符与 Attribute 的映射 |
+| val qualified4Part: Map[(String, String, String, String), Seq[Attribute]] |四个限定符与 Attribute 的映射|
 
 ### AttributeSet
 
@@ -253,3 +272,87 @@ protected[sql] def toAttributes: Seq[AttributeReference] =
    最终的 LogicalPlan 如下
 
    ![final logical plan](/docs/spark/expression/attribute/expression-project-resolved.svg)
+
+4. BoundReference
+
+   Attribute 是一个属性，它的实现类不管是 UnresolvedAttribute 或是 AttributeReference 都是 Unevaluable 的，是不能直接计算和 Codegen. 但是我们其它有Attribute的expression 是需要计算和 codegen的, 因为有些 expression 是基于 Attribute 上做一些运行， 如大部分 agg function, SortOrder等需要在对应的列上进行计算, 而 Attribute 里保存着相关列的相关信息. 那如何才能让 Attribute 参与到计算中呢. 答案是通过 BoundReference.
+
+   ``` scala
+   case class BoundReference(ordinal: Int, dataType: DataType, nullable: Boolean) extends LeafExpression {
+   ```
+
+   - ordinal BoundReference与输入的 InternalRow 的哪个 slot 进行绑定
+   - dataType 绑定slot的输入数据类型
+   - nullable 绑定slot是否可null
+
+   Spark 通过 BindReferences.bindReference 将一个 AttributeReference 与 输入进行绑定
+
+   ``` scala
+   def bindReference[A <: Expression](
+      expression: A, // 需要被绑定的 expression
+      input: AttributeSeq,  //输入的属性
+      allowFailures: Boolean = false): A = {
+    expression.transform { case a: AttributeReference => // transform 获得 AttributeReference
+      attachTree(a, "Binding attribute") {
+        val ordinal = input.indexOf(a.exprId) // 获得 AttributeReference 在 input 中的位置
+        if (ordinal == -1) {
+          if (allowFailures) {
+            a
+          } else {
+            sys.error(s"Couldn't find $a in ${input.attrs.mkString("[", ",", "]")}")
+          }
+        } else {
+          BoundReference(ordinal, a.dataType, input(ordinal).nullable) //生成 BoundReference
+        }
+      }
+    }.asInstanceOf[A]
+   ```
+
+   下面的代码来看下 BoundReference 是如何参与到计算或 codegen 中的
+
+   ``` scala
+    val colInfo = 'b.int
+    val inputSchema: AttributeSeq = new AttributeSeq(Seq('a.int, colInfo))
+    val input = new GenericInternalRow(Array[Any](1, 20))
+
+    val absExpr = Abs(colInfo) //对 b 列求绝对值
+
+    // absExpr.eval(input) //报错，因为 Abs的child为AttributeReference是不能直接计算的
+    val ctx = new CodegenContext
+    // absExpr.genCode(ctx) //报错, 因为 Abs的child为AttributeReference是不能参与codegen
+
+    val expr = BindReferences.bindReference(absExpr, inputSchema)
+
+    expr.eval(input) // worked
+    expr.genCode(ctx) // worked
+   ```
+
+   BoundReference 如何 eval ?
+
+   ``` scala
+   case class BoundReference(ordinal: Int, dataType: DataType, nullable: Boolean)
+      extends LeafExpression {
+
+     // 最终调用 input.getInt(oridinal) //获得第 oridinal 列的数据
+     private val accessor: (InternalRow, Int) => Any = InternalRow.getAccessor(dataType, nullable)
+
+     // Use special getter for primitive types (for UnsafeRow)
+     override def eval(input: InternalRow): Any = {
+       accessor(input, ordinal)
+     }
+   ```
+
+   BoundReference 生成什么样的代码
+
+   ``` java
+
+    boolean isNull_1 = i.isNullAt(1);
+    int value_1 = isNull_1 ? -1 : (i.getInt(1)); // BoundReference 生成的代码，从 InputRow 里取第1列的值
+
+    boolean isNull_0 = isNull_1;
+    int value_0 = -1;
+
+    if (!isNull_1) {
+      value_0 = (int)(java.lang.Math.abs(value_1));
+    }
+   ```
