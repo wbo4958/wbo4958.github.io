@@ -275,7 +275,7 @@ protected[sql] def toAttributes: Seq[AttributeReference] =
 
 4. BoundReference
 
-   Attribute 是一个属性，它的实现类不管是 UnresolvedAttribute 或是 AttributeReference 都是 Unevaluable 的，是不能直接计算和 Codegen. 但是我们其它有Attribute的expression 是需要计算和 codegen的, 因为有些 expression 是基于 Attribute 上做一些运行， 如大部分 agg function, SortOrder等需要在对应的列上进行计算, 而 Attribute 里保存着相关列的相关信息. 那如何才能让 Attribute 参与到计算中呢. 答案是通过 BoundReference.
+   Attribute 是一个属性，它的实现类不管是 UnresolvedAttribute 或是 AttributeReference 都是 Unevaluable 的，是不能参与计算和 Codegen. 但是有些包含Attribute的expression是需要计算和codegen的, 如大部分 agg function, SortOrder等需要在对应的列上进行计算, 而 Attribute 里保存着相关列的信息. 那如何才能让 Attribute 参与到计算中呢. 答案是通过 BoundReference.
 
    ``` scala
    case class BoundReference(ordinal: Int, dataType: DataType, nullable: Boolean) extends LeafExpression {
@@ -285,7 +285,7 @@ protected[sql] def toAttributes: Seq[AttributeReference] =
    - dataType 绑定slot的输入数据类型
    - nullable 绑定slot是否可null
 
-   Spark 通过 BindReferences.bindReference 将一个 AttributeReference 与 输入进行绑定
+   Spark 通过 BindReferences.bindReference 将一个 Expression与输入进行绑定， 其本质上是将 Expression中的AttributeReference 与 输入进行绑定
 
    ``` scala
    def bindReference[A <: Expression](
