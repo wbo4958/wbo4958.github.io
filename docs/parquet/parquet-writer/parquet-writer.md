@@ -18,8 +18,39 @@ parent: Parquet
 
 ## 示例代码
 
-``` java
+下面的代码用来创建一个 `/tmp/test-x1231.parquet` 文件
 
+``` java
+File file = new File("/tmp/test-x1231.parquet");
+if (file.exists()) {
+  file.delete();
+}
+Path fsPath = new Path(file.getAbsolutePath());
+Configuration conf = new Configuration();
+MessageType schema = new MessageType("schema",
+  new PrimitiveType(REQUIRED, PrimitiveType.PrimitiveTypeName.INT32, "int32_field"),
+  new PrimitiveType(REQUIRED, PrimitiveType.PrimitiveTypeName.INT32, "int32_field_dup"));
+SimpleGroupFactory fact = new SimpleGroupFactory(schema);
+GroupWriteSupport.setSchema(schema, conf);
+try (
+  ParquetWriter<Group> writer = new ParquetWriter<>(
+    fsPath,
+    new GroupWriteSupport(),
+    CompressionCodecName.UNCOMPRESSED,
+    1024, //block size
+    1024, //page size
+    512, //dictionary size
+    true, //是否enable Dictionary encoding
+    false,
+    ParquetProperties.WriterVersion.PARQUET_2_0,
+    conf)) {
+  int data[] = new int[]{2, 5, 4, 8, 3, 7, 1, 6};
+  for (int i = 0; i < data.length; i++) {
+    writer.write(fact.newGroup()
+      .append("int32_field", data[i])
+      .append("int32_field_dup", data[i]));
+  }
+}
 ```
 
 ## 生成 Parquet 文件的流程
