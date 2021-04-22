@@ -94,11 +94,47 @@ encodedValues: 0 0 1 1 2
 
 ## ParquetWriter.close
 
-ParquetWriter.write 仅仅是将数据写入到 initalWriter 中. 并没有生成最后的 data bytes. 而真正触发生成最后的 data bytes, 是 ParquetWriter.close 中 writePage 来触发 getBytes 的.
+ParquetWriter.write 仅仅是将数据写入到 initalWriter 中. 并没有生成最后的 data bytes. 最终是由 ParquetWriter.close 中 writePage 来触发 getBytes 的.
 
-### ValuesWriter.getBytes
+``` java
+public void flush() {
+  for (ColumnWriterV2 memColumn : columns.values()) {
+    long rows = rowCount - memColumn.getRowsWrittenSoFar();
+    if (rows > 0) {
+      memColumn.writePage(rowCount); //先写page
+    }
+    memColumn.finalizeColumnChunk(); // 再写 DictionaryPage
+  }
+}
+```
 
-对于是 FallbackValuesWriter, 会触发 initialWriter.getBytes.
+ColumnWriterStoreV2.flush 触发所有列的 ColumnWriterV2 将 repetition/definition/data 通过writePage写入到 Page中, 然后再写入  DictionaryPage.
+
+### writePage
+
+如下代码所示
+
+```java
+void writePage(int rowCount, int valueCount, Statistics<?> statistics,ValuesWriter repetitionLevels,
+    ValuesWriter definitionLevels, ValuesWriter values) throws IOException {
+  // TODO: rework this API. The bytes shall be retrieved before the encoding (encoding might be different otherwise)
+  BytesInput bytes = values.getBytes(); // 获得编译码的 values 的字节流
+  Encoding encoding = values.getEncoding(); // Values 的 encoding 方式, 如果是 RLE编码, 后面在写page后会写入dictionary page
+  pageWriter.writePageV2(
+      rowCount,
+      Math.toIntExact(statistics.getNumNulls()),
+      valueCount,
+      repetitionLevels.getBytes(),
+      definitionLevels.getBytes(),
+      encoding,
+      bytes,
+      statistics); //统计信息
+}
+```
+
+- ValuesWriter.getBytes
+
+以 INT32 为例, dataColumn是FallbackValuesWriter, 首先触发 initialWriter.getBytes 获得编码后的数据字节流.
 
 getBytes 首先通过 RunLengthBitPackingHybridEncoder 将 DictionaryValuesWriter 里的 encodedValues 执行 RunLength以及BitPacking 混合编码方式获得最后的数据字节.
 
@@ -106,7 +142,88 @@ RunLengthBitPackingHybridEncoder 算法如下所示
 
 ![RunLengthBitPackingHybridEncoder](/docs/parquet/parquet-writer/parquet-RunLengthBitPackingHybridEncoder.svg)
 
+RunLengthBitPackingHybridEncoder 编码示例
+
 ![parquet-runlenbitpack](/docs/parquet/parquet-writer/parquet-runlenbitpack.svg)
+
+如果 initalWriter 对数据索引(encodedValues)编码后的字节大小 encodedSize 与 dictionaryByteSize (真实的数据) 之和 大于原始的数据字节大小，则说明 initialWriter 的编码方式不优，这时候触发 fallBackWriter. 注意， fallback 只在写第一个 Page 的时候才有可能触发，如果已经触发 fallback 了，写后面的page时，都使用 fallback 编码.
+
+``` java
+public boolean isCompressionSatisfying(long rawSize, long encodedSize) {
+  return (encodedSize + dictionaryByteSize) < rawSize;
+}
+```
+
+对于 INT32, fallBackWriter 是 DeltaBinaryPackingValuesWriterForInteger. 那它的编码方式如下
+
+![parquet-deltaDictionary.svg](/docs/parquet/parquet-writer/parquet-deltaDictionary.svg)
+
+- writePageV2
+
+``` java
+public void writePageV2(
+    int rowCount, int nullCount, int valueCount,
+    BytesInput repetitionLevels, BytesInput definitionLevels,
+    Encoding dataEncoding, BytesInput data,
+    Statistics<?> statistics) throws IOException {
+  pageOrdinal++;
+  
+  int rlByteLength = toIntWithCheck(repetitionLevels.size()); //repetition level长度
+  int dlByteLength = toIntWithCheck(definitionLevels.size()); //definition level
+  int uncompressedSize = toIntWithCheck(
+      data.size() + repetitionLevels.size() + definitionLevels.size()
+  ); //未压缩的数据长度
+  // TODO: decide if we compress
+  BytesInput compressedData = compressor.compress(data); //只压缩数据，如 snappy压缩
+  if (null != pageBlockEncryptor) { // 对压缩后的数据进行加密
+    AesCipher.quickUpdatePageAAD(dataPageAAD, pageOrdinal);
+    compressedData = BytesInput.from(pageBlockEncryptor.encrypt(compressedData.toByteArray(), dataPageAAD));
+  }
+  int compressedSize = toIntWithCheck( // 获得压缩后大小
+      compressedData.size() + repetitionLevels.size() + definitionLevels.size());
+  tempOutputStream.reset(); // page header 会写入到 tempOutputStream
+  if (null != headerBlockEncryptor) {
+    AesCipher.quickUpdatePageAAD(dataPageHeaderAAD, pageOrdinal);
+  }
+  parquetMetadataConverter.writeDataPageV2Header( //写入 page header
+      uncompressedSize, compressedSize,
+      valueCount, nullCount, rowCount,
+      dataEncoding,
+      rlByteLength,
+      dlByteLength,
+      tempOutputStream,
+      headerBlockEncryptor,
+      dataPageHeaderAAD);
+  this.uncompressedLength += uncompressedSize; //记录所有的 uncompressedLength
+  this.compressedLength += compressedSize; // 记录所有的 compressedLength
+  this.totalValueCount += valueCount; //记录所有的行数
+  this.pageCount += 1;  //记录所有的 page count
+  // Copying the statistics if it is not initialized yet so we have the correct typed one
+  if (totalStatistics == null) {
+    totalStatistics = statistics.copy();
+  } else {
+    totalStatistics.mergeStatistics(statistics); // 记录所有页的统计信息
+  }
+  columnIndexBuilder.add(statistics); //当前页的统计信息
+  offsetIndexBuilder.add(toIntWithCheck((long) tempOutputStream.size() + compressedSize), rowCount); //offset index
+  // by concatenating before collecting instead of collecting twice,
+  // we only allocate one buffer to copy into instead of multiple.
+  buf.collect( // 组装 Page 而, PageHeader + repetition + definition + compressedData
+      BytesInput.concat(
+          BytesInput.from(tempOutputStream),
+          repetitionLevels,
+          definitionLevels,
+          compressedData)
+  );
+  dataEncodings.add(dataEncoding); //记录所有的数据 encoding 方式
+}
+```
+
+
+
+### writeDictionaryPage
+
+
 
 ## TODO
 
