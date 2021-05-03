@@ -184,6 +184,4 @@ for (int i_1 = 0; i_1 < arrayData_0.numElements(); i_1 ++) {
 }
 ```
 
-###
-
-其它的 Array 操作也是基于 ArrayData 数据结构百变不离其中.
+其它的 Array 操作也是基于 ArrayData 数据结构, 百变不离其中.
