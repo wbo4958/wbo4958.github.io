@@ -19,7 +19,7 @@ grand_parent: Spark
 
 ## array
 
-### array 的数据类型
+array 的数据类型
 
 Spark 底层使用 ArrayData 表示一个 array. ArrayData 有三个子例分别为
 
@@ -94,7 +94,7 @@ Spark 底层使用 ArrayData 表示一个 array. ArrayData 有三个子例分别
   arrayData_2.update(1, arrayData_4); //更新二维数组第二列
   ```
 
-## array_contains
+### array_contains
 
 检查 Array 中是否包含 value
 
@@ -154,12 +154,36 @@ Spark 底层使用 ArrayData 表示一个 array. ArrayData 有三个子例分别
 
   references[0] 是传入的需要比较的数组 Array(9). compareArray_0 函数请参考 [genComp](/docs/spark/codegen/codegen-context/codegencontext2.html#gencomp)
 
-## array_max/array_min
-## array_distinct
-## array_sort
-## array_remove
-## array_intersect
-## array_union
-## array_except
-## array_position
-## array_join
+### array_max/array_min
+
+- 一维数组
+
+``` java
+boolean isNull_0 = true; //保证 value_0 第一次被 assign 给 arrayData_0.getInt(0)
+int value_0 = -1;
+for (int i_1 = 0; i_1 < arrayData_0.numElements(); i_1 ++) {
+  if (!(arrayData_0.isNullAt(i_1)) && (isNull_0 ||
+    (arrayData_0.getInt(i_1)) > value_0)) {
+    isNull_0 = false;
+    value_0 = (arrayData_0.getInt(i_1));
+  }
+}
+```
+
+- 二维数组
+
+``` java
+boolean isNull_0 = true;  //保证 value_0 第一次被 assign 给 arrayData_0.getInt(0)
+ArrayData value_0 = null; //保存最大值
+for (int i_1 = 0; i_1 < arrayData_0.numElements(); i_1 ++) {
+  if (!(arrayData_0.isNullAt(i_1)) && (isNull_0 ||
+    (compareArray_0((arrayData_0.getArray(i_1)), value_0)) > 0)) {
+    isNull_0 = false;
+    value_0 = (arrayData_0.getArray(i_1)); 
+  }
+}
+```
+
+###
+
+其它的 Array 操作也是基于 ArrayData 数据结构百变不离其中.
