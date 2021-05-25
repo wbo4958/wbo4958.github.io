@@ -21,7 +21,7 @@ grand_parent: Spark
 
 array 的数据类型
 
-Spark 底层使用 ArrayData 表示一个 array. ArrayData 有三个子例分别为
+Spark 底层使用 ArrayData 表示一个 array. ArrayData 有三个子类分别为
 
 ![functions](/docs/spark/sql-functions/array/functions.svg)
 
