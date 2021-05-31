@@ -66,12 +66,10 @@ grand_parent: Spark
 
   表示 calendar intervals, 由 months/days/microseconds 表示.
 
-### 辅助计算函数
+### date/time 相关函数
 
 - current_date/current_timestamp
 
-  打印当前 driver 的日期与时间, 在 Optimizer 阶段已经将 driver 的时间计算出来了.
-  
   ``` scala
   scala> val df = spark.sql("select current_date, current_timestamp")
   df: org.apache.spark.sql.DataFrame = [current_date(): date, current_timestamp(): timestamp]
@@ -102,3 +100,11 @@ grand_parent: Spark
   |2021-05-31    |2021-05-31 08:04:10.926|
   +--------------+-----------------------+
   ```
+
+  current_date与current_timestamp分别计算 driver 的日期与时间, 
+
+  Spark Catalyst 中 CurrentDate/CurrentTimestamp 分别描述 current_date与
+  current_timestamp. 且在 Optimizer 阶段已经将 driver 的时间计算出来了. 具体参考
+  [ComputeCurrentTime](https://github.com/apache/spark/blob/branch-3.1/sql/catalyst/src/main/scala/org/apache/spark/sql/catalyst/optimizer/finishAnalysis.scala#L73)
+
+  这里需要注意的是 CurrentDate 也是通过 CurrentTimestamp 先获得 microseconds 然后再转换为 Date.
