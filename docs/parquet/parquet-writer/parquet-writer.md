@@ -8,7 +8,7 @@ parent: Parquet
 # Parquet Writer
 {: .no_toc}
 
-本文通过一个创建parquet格式文件的代码来学习 Parquet writer以及 Parquet format. 本文基于 [Parquet-mr](https://github.com/apache/parquet-mr) 1.12.0 release.
+本文通过创建 parquet 格式文件的代码来学习 Parquet writer 以及 Parquet format. 本文基于 [Parquet-mr](https://github.com/apache/parquet-mr) 1.13.0-SNAPSHOT release.
 
 ## 目录
 {: .no_toc .text-delta}
@@ -21,37 +21,107 @@ parent: Parquet
 下面的代码用来创建一个 `/tmp/test-x1231.parquet` 文件
 
 ``` java
-File file = new File("/tmp/test-x1231.parquet");
-if (file.exists()) {
-  file.delete();
-}
-Path fsPath = new Path(file.getAbsolutePath());
-Configuration conf = new Configuration();
-MessageType schema = new MessageType("schema",
-  new PrimitiveType(REQUIRED, PrimitiveType.PrimitiveTypeName.INT32, "int32_field"),
-  new PrimitiveType(REQUIRED, PrimitiveType.PrimitiveTypeName.INT32, "int32_field_dup"));
-SimpleGroupFactory fact = new SimpleGroupFactory(schema);
-GroupWriteSupport.setSchema(schema, conf);
-try (
-  ParquetWriter<Group> writer = new ParquetWriter<>(
-    fsPath,
-    new GroupWriteSupport(),
-    CompressionCodecName.UNCOMPRESSED,
-    1024, //block size
-    1024, //page size
-    512, //dictionary size
-    true, //是否enable Dictionary encoding
-    false,
-    ParquetProperties.WriterVersion.PARQUET_2_0,
-    conf)) {
-  int data[] = new int[]{2, 5, 4, 8, 3, 7, 1, 6};
-  for (int i = 0; i < data.length; i++) {
-    writer.write(fact.newGroup()
-      .append("int32_field", data[i])
-      .append("int32_field_dup", data[i]));
-  }
-}
+    MessageType schema = MessageTypeParser.parseMessageType(
+        "message Document {\n" +
+            "     required int32 DocId;\n" +
+            "     optional group Links {\n" +
+            "         repeated int32 Backward;\n" +
+            "         repeated int32 Forward; }\n" +
+            "     repeated group Name {\n" +
+            "         repeated group Language {\n" +
+            "             required binary Code;\n" +
+            "             optional binary County; }\n" +
+            "         optional binary Url; }}");
+
+    File file = new File("/tmp/test-x1231.parquet");
+    if (file.exists()) {
+      file.delete();
+    }
+    Path fsPath = new Path(file.getAbsolutePath());
+    SimpleGroupFactory factory = new SimpleGroupFactory(schema);
+
+    ParquetWriter writer = ExampleParquetWriter.builder(fsPath)
+        .withType(schema)
+        .withWriterVersion(ParquetProperties.WriterVersion.PARQUET_2_0)
+        .build();
+
+    // Group 0
+    Group group = factory.newGroup()
+        .append("DocId", 10);
+    group
+        .addGroup("Links")
+            .append("Forward", 20)
+            .append("Forward", 40)
+            .append("Forward", 60);
+
+    Group name1 = group
+        .addGroup("Name")
+            .append("Url", "http://A");
+        name1
+            .addGroup("Language")
+                .append("Code", "en-us")
+                .append("County", "us");
+        name1
+            .addGroup("Language")
+                .append("Code", "en");
+    group
+        .addGroup("Name")
+            .append("Url", "http://B");
+    group
+        .addGroup("Name")
+            .addGroup("Language")
+                .append("Code", "en-gb")
+                .append("County", "gb");
+    // Group 0 --------------
+
+    // Group 1 ++++++++++++++
+    Group group1 = factory.newGroup()
+        .append("DocId", 20);
+    group1
+        .addGroup("Links")
+            .append("Backward", 10)
+            .append("Backward", 30)
+            .append("Forward", 80);
+    group1
+        .addGroup("Name")
+            .append("Url", "http://C");
+    // Group 1 --------------
+
+    System.out.println(schema);
+    writer.write(group);
+    writer.write(group1);
 ```
+
+## Schema
+
+通过 Parquet 自带的 `MessageTypeParser.parseMessageType` 可以将 Schema 描述语言解析成 Parquet MessageType.
+
+``` java
+MessageType schema = MessageTypeParser.parseMessageType(
+    "message Document {\n" +
+    "     required int32 DocId;\n" +
+    "     optional group Links {\n" +
+    "         repeated int32 Backward;\n" +
+    "         repeated int32 Forward; }\n" +
+    "     repeated group Name {\n" +
+    "         repeated group Language {\n" +
+    "             required binary Code;\n" +
+    "             optional binary County; }\n" +
+    "         optional binary Url; }}");
+```
+
+- required: 表示该字段出现一次
+- optional: 表示该字段出现 0 次或 1 次
+- repeated: 表示该字段出现 0 次或 多次
+
+Parquet 通过 definition 和 repetition 可以很好的表示如 List/Sets/Map 这样的数据类型.
+
+### Definition
+
+Definition 可以用于表示哪个字段为 null. 一个字段的 definition 的范围为 0 (root schema) 到该字段的最大深度.
+
+### Repetition
+
 
 ## 生成 Parquet 文件的流程
 
@@ -99,7 +169,7 @@ public void writeInteger(int v) {
 
 如有以下数据
 
-```
+``` console
 21111111, 21111111, 390909090, 390909090, 47766521212
 
 intDictionaryContent: 21111111->0,  390909090->1, 47766521212->2
@@ -251,7 +321,7 @@ ParquetWriter.write 仅仅是将数据写入到 initalWriter 中(这里假设 Pa
 
       如上面 RunLengthBitPackingHybridEncoder sample 所示，对于下面数据，它的 Dictionary 数据为
 
-      ```
+      ``` console
       value: 7 7 7 7 7 7 7 7 7 3 7 7 7 7 7 7 7 7 2 3 3 2 3 2 8 8 8 8 8 8 8 8 8
       dictionary bytes:  7 0 0 0 3 0 0 0 2 0 0 0 8 0 0 0 //一个数据点4个字节
       ```
@@ -283,10 +353,6 @@ ParquetWriter.write 仅仅是将数据写入到 initalWriter 中(这里假设 Pa
 |pageRowCountLimit|20,000| 每个page 的行数 |
 |pageSizeThreshold|1K| page 的大小|
 |dictionaryPageSizeThreshold| dictionary page大小|
-
-
-
-
 
 ## TODO
 
