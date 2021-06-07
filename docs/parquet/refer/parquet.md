@@ -8,15 +8,15 @@ We recently introduced Parquet, an open source file format for Hadoop that provi
 
 To illustrate what columnar storage is all about, here is an example with three columns.
 
-![](dremel_made_simplewithparquet95.thumb.1280.1280.png)
+![parquet](dremel_made_simplewithparquet95.thumb.1280.1280.png)
 
 In a row-oriented storage, the data is laid out one row at a time as follows:
 
-![](dremel_made_simplewithparquet96.thumb.1280.1280.png)
+![parquet](dremel_made_simplewithparquet96.thumb.1280.1280.png)
 
 Whereas in a column-oriented storage, it is laid out one column at a time:
 
-![](dremel_made_simplewithparquet97.thumb.1280.1280.png)
+![parquet](dremel_made_simplewithparquet97.thumb.1280.1280.png)
 
 There are several advantages to columnar formats.
 
@@ -49,11 +49,11 @@ message AddressBook {
 
 Lists (or Sets) can be represented by a repeating field.
 
-![](dremel_made_simplewithparquet98.thumb.1280.1280.png)
+![parquet](dremel_made_simplewithparquet98.thumb.1280.1280.png)
 
 A Map is equivalent to a repeating field containing groups of key-value pairs where the key is required.
 
-![](dremel_made_simplewithparquet99.thumb.1280.1280.png)
+![parquet](dremel_made_simplewithparquet99.thumb.1280.1280.png)
 
 ## Columnar format
 
@@ -61,11 +61,11 @@ A columnar format provides more efficient encoding and decoding by storing toget
 
 AddressBook example as a tree:
 
-![](dremel_made_simplewithparquet100.thumb.1280.1280.png)
+![parquet](dremel_made_simplewithparquet100.thumb.1280.1280.png)
 
 To represent the data in columnar format we create one column per primitive type cell shown in blue.
 
-![](dremel_made_simplewithparquet101.thumb.1280.1280.png)
+![parquet](dremel_made_simplewithparquet101.thumb.1280.1280.png)
 
 The structure of the record is captured for each value by two integers called repetition level and definition level. Using definition and repetition levels, we can fully reconstruct the nested structures. This will be explained in detail below.
 
@@ -91,9 +91,9 @@ It contains one column: a.b.c where all fields are optional and can be null. Whe
 
 Here is the definition level for each of the following cases:
 
-![](dremel_made_simplewithparquet102.thumb.1280.1280.png)
+![parquet](dremel_made_simplewithparquet102.thumb.1280.1280.png)
 
-![](dremel_made_simplewithparquet103.thumb.1280.1280.png)
+![parquet](dremel_made_simplewithparquet103.thumb.1280.1280.png)
 
 The maximum possible definition level is 3, which indicates that the value is defined. Values 0 to 2 indicate at which level the null field occurs.
 
@@ -111,7 +111,7 @@ message ExampleDefinitionLevel {
 
 The maximum definition level is now 2 as b does not need one. The value of the definition level for the fields below b changes as follows:
 
-![](dremel_made_simplewithparquet104.thumb.1280.1280.png)
+![parquet](dremel_made_simplewithparquet104.thumb.1280.1280.png)
 
 Making definition levels small is important as the goal is to store the levels in as few bits as possible.
 
@@ -119,11 +119,11 @@ Making definition levels small is important as the goal is to store the levels i
 
 To support repeated fields we need to store when new lists are starting in a column of values. This is what repetition level is for: it is the level at which we have to create a new list for the current value. In other words, the repetition level can be seen as a marker of when to start a new list and at which level. For example consider the following representation of a list of lists of strings:
 
-![](dremel_made_simplewithparquet105.thumb.1280.1280.png)
+![parquet](dremel_made_simplewithparquet105.thumb.1280.1280.png)
 
 The column will contain the following repetition levels and values:
 
-![](dremel_made_simplewithparquet106.thumb.1280.1280.png)
+![parquet](dremel_made_simplewithparquet106.thumb.1280.1280.png)
 
 The repetition level marks the beginning of lists and can be interpreted as follows:
 
@@ -133,7 +133,7 @@ The repetition level marks the beginning of lists and can be interpreted as foll
 
 On the following diagram we can visually see that it is the level of nesting at which we insert records:
 
-![](dremel_made_simplewithparquet107.thumb.1280.1280.png)
+![parquet](dremel_made_simplewithparquet107.thumb.1280.1280.png)
 
 A repetition level of 0 marks the beginning of a new record. In a flat schema there is no repetition and the repetition level is always 0. Only levels that are repeated need a Repetition level: optional or required fields are never repeated and can be skipped while attributing repetition levels.
 
@@ -141,7 +141,7 @@ A repetition level of 0 marks the beginning of a new record. In a flat schema th
 
 Now using the two notions together, let’s consider the AddressBook example again. This table shows the maximum repetition and definition levels for each column with explanations on why they are smaller than the depth of the column:
 
-![](dremel_made_simplewithparquet108.thumb.1280.1280.png)
+![parquet](dremel_made_simplewithparquet108.thumb.1280.1280.png)
 
 In particular for the column contacts.phoneNumber, a defined phone number will have the maximum definition level of 2, and a contact without phone number will have a definition level of 1. In the case where contacts are absent, it will be 0.
 
@@ -181,7 +181,7 @@ AddressBook {
 
 The data in the column will be as follows (R = Repetition Level, D = Definition Level)
 
-![](dremel_made_simplewithparquet109.thumb.1280.1280.png)
+![parquet](dremel_made_simplewithparquet109.thumb.1280.1280.png)
 
 To write the column we iterate through the record data for this column:
 
@@ -197,7 +197,7 @@ To write the column we iterate through the record data for this column:
 
 The columns contains the following data:
 
-![](dremel_made_simplewithparquet110.thumb.1280.1280.png)
+![parquet](dremel_made_simplewithparquet110.thumb.1280.1280.png)
 
 Note that NULL values are represented here for clarity but are not stored at all. A definition level strictly lower than the maximum (here 2) indicates a NULL value.
 
