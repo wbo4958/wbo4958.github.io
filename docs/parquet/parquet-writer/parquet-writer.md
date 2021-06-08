@@ -114,6 +114,70 @@ MessageType schema = MessageTypeParser.parseMessageType(
 - optional: 表示该字段出现 0 次或 1 次
 - repeated: 表示该字段出现 0 次或 多次
 
+可以通过下面的计算获得一个Primitive column的最大 definition与repetition
+
+``` c
+Max Definition = sizeof(optional) + sizeof(repeated)
+Max Repetition = sizeof(repeated)
+```
+
+| Column Path              | Max Definition Level   | Max Repetition Level |
+| ---                      | -----                  | -----                |
+| [DocId]                  | 0 ( required)          | 0                    |
+| [Links, Backward]        | 2                      | 1                    |
+| [Links, Forward]         | 2                      | 1                    |
+| [Name, Language, Code]   | 2 (Code is required)   | 2                    |
+| [Name, Language, County] | 3 (County is optional) | 2                    |
+| [Name, Url]              | 2                      | 1                    |
+
+以数据为例
+
+- [DocId]
+  | value | r  | d  |
+  | ----  | -- | -- |
+  | 10    | 0  | 0  |
+  | 20    | 0  | 0  |
+
+  对于 `required int32 DocId`, r/d 没有意义, 它必须存在且不能为空.
+
+- [Links, Backward]
+  | value | r  | d  |
+  | ----  | -- | -- |
+  | NULL  | 0  | 1  |
+  | 10    | 0  | 2  |
+  | 30    | 1  | 2  |
+
+  Links 声明为 Optional, 最多只出现 1 次, 而 Backward声明为 repeated, 可以出现多次.
+  
+  r=0 表示创建一个新的行, r=1表示在对应行后创建一个新的元素, d=1 表示该行为 NULL, d=Max_Definition_Level 表示该行是有值的.
+
+- [Links, Forward]
+  | value | r  | d  | Row  ||
+  | ----  | -- | -- | ---  | --- |
+  | 20    | 0  | 2  | Row1 | r=0 表示创建 Row1, 此时为 [20] |
+  | 40    | 1  | 2  | Row1 | r=1 表示创建一个新元素此时为 [20, 40]|
+  | 60    | 1  | 2  | Row1 | r=1 表示创建一个新元素此时为 [20, 40, 60]|
+  | 80    | 0  | 2  | Row2 | r=0 表示创建 Row2, 此时为 [80]|
+
+  Links 声明为 Optional, 最多只出现 1 次, 而 Forward 声明为 repeated, 可以出现多次.
+  
+  r=0 表示创建一个新的行, r=1表示在对应行后创建一个新的元素, d=1 表示第一层为 NULL, d=Max_Definition_Level(该值为2) 表示该行是有值的.
+
+- [Name, Language, Code]
+  | value | r  | d  | Row  ||
+  | ----  | -- | -- | ---  | --- |
+  | en-us | 0  | 2  | Row1 | r=0, 创建 Row1, 此时Name.Language.Code=[en-us]|
+  | en    | 2  | 2  | Row1 | r=2, 创建 Row1, 此时Name.Language.Code=[en-us]|
+  | _NULL_| 1  | 1  | Row1 | r=0, 创建 Row1, 此时Name.Language.Code=[en-us]|
+  | en-gb | 1  | 2  | Row1 | r=0, 创建 Row1, 此时Name.Language.Code=[en-us]|
+  | _NULL_| 0  | 1  | Row2 | r=0, 创建 Row1, 此时Name.Language.Code=[en-us]|
+
+  Name 声明为 repeated, 可以出现多次, Language也声明为 repeated 也是可以出现多次,
+  而 Code 声明为 required, 只能出现一次，即如果 Language不为 Null, Code必须要出现.
+  
+  r=0 表示创建一个新的行, r=1表示在对应行后创建一个新的元素, d=1 表示该行为 NULL, d=Max_Definition_Level(该值为2) 表示该行是有值的.
+
+
 Parquet 通过 definition 和 repetition 可以很好的表示如 List/Sets/Map 这样的数据类型.
 
 ### Definition
