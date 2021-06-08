@@ -149,34 +149,49 @@ Max Repetition = sizeof(repeated)
 
   Links 声明为 Optional, 最多只出现 1 次, 而 Backward声明为 repeated, 可以出现多次.
   
-  r=0 表示创建一个新的行, r=1表示在对应行后创建一个新的元素, d=1 表示该行为 NULL, d=Max_Definition_Level 表示该行是有值的.
+  r=0表示创建一个新的行, r=1表示在第一级Links.Backward进行重复, d=1 表示该行为 NULL, d=Max_Definition_Level 表示该行是有值的.
 
 - [Links, Forward]
   | value | r  | d  | Row  ||
   | ----  | -- | -- | ---  | --- |
-  | 20    | 0  | 2  | Row1 | r=0 表示创建 Row1, 此时为 [20] |
-  | 40    | 1  | 2  | Row1 | r=1 表示创建一个新元素此时为 [20, 40]|
-  | 60    | 1  | 2  | Row1 | r=1 表示创建一个新元素此时为 [20, 40, 60]|
-  | 80    | 0  | 2  | Row2 | r=0 表示创建 Row2, 此时为 [80]|
+  | 20    | 0  | 2  | Row1 | r=0 表示创建 Row1, d=Max definition(2) 表示[Links, Forward]此时为 [20] |
+  | 40    | 1  | 2  | Row1 | r=1 表示在Forward处重复, 即添加一个新元素, d=Max definition(2), 表示[Links, Forward]此时为 [20, 40]|
+  | 60    | 1  | 2  | Row1 | r=1 表示在Forward处重复, 即添加一个新元素, d=Max definition(2), 表示[Links, Forward]此时为 [20, 40, 60]|
+  | 80    | 0  | 2  | Row2 | r=0 表示创建 Row2, d=Max definition(2), 表示[Links, Forward] 此时为 [80]|
 
   Links 声明为 Optional, 最多只出现 1 次, 而 Forward 声明为 repeated, 可以出现多次.
   
-  r=0 表示创建一个新的行, r=1表示在对应行后创建一个新的元素, d=1 表示第一层为 NULL, d=Max_Definition_Level(该值为2) 表示该行是有值的.
+  r=0 表示创建一个新的行, r=1表示在第一级进行重复这里是 Links.Forward进行重复(因为Links不是repeated), d=1 表示第一层为 NULL, d=Max_Definition_Level(该值为2) 表示该行是有值的.
 
 - [Name, Language, Code]
   | value | r  | d  | Row  ||
   | ----  | -- | -- | ---  | --- |
-  | en-us | 0  | 2  | Row1 | r=0, 创建 Row1, 此时Name.Language.Code=[en-us]|
-  | en    | 2  | 2  | Row1 | r=2, 创建 Row1, 此时Name.Language.Code=[en-us]|
-  | _NULL_| 1  | 1  | Row1 | r=0, 创建 Row1, 此时Name.Language.Code=[en-us]|
-  | en-gb | 1  | 2  | Row1 | r=0, 创建 Row1, 此时Name.Language.Code=[en-us]|
-  | _NULL_| 0  | 1  | Row2 | r=0, 创建 Row1, 此时Name.Language.Code=[en-us]|
+  | en-us | 0  | 2  | Row1 | r=0, 创建 Row1, d=Max definition(2), 表示[Name, Language, Code] 此时为[en-us]|
+  | en    | 2  | 2  | Row1 | r=2表示在Language处进行重复, d=Max definition(2), 表示此时Name.Language.Code=[en]|
+  | _NULL_| 1  | 1  | Row1 | r=1表示在Names处进行重复, d=1 表示第一级为 Null, 即Name.Language=NULL|
+  | en-gb | 1  | 2  | Row1 | r=1表示在Names处进行重复, d=Max definition(2), 表示此时Name.Language.Code=[en-gb]|
+  | _NULL_| 0  | 1  | Row2 | r=0, 创建新的Row2, d=1 表示第一级为 NULL, 即 Name.Language=NULL|
 
   Name 声明为 repeated, 可以出现多次, Language也声明为 repeated 也是可以出现多次,
-  而 Code 声明为 required, 只能出现一次，即如果 Language不为 Null, Code必须要出现.
-  
-  r=0 表示创建一个新的行, r=1表示在对应行后创建一个新的元素, d=1 表示该行为 NULL, d=Max_Definition_Level(该值为2) 表示该行是有值的.
+  当 r=0时，表示创建新的Row, r=1时表示在 Names处进行重复, r=2时表示在 Names.Language处重复
+  而 Code 声明为 required, 只能出现一次，即如果 d=Max definition时, Code值有效.
 
+- [Name, Language, County]
+  | value | r  | d  | Row  ||
+  | ----  | -- | -- | ---  | --- |
+  | us    | 0  | 3  | Row1 | r=0, 创建 Row1, d=Max definition(3), 表示[Name, Language, Code] 此时为[us]|
+  | _NULL_| 2  | 2  | Row1 | r=2表示在Name.Language处进行重复, d=2, 表示此时Name.Language.Code = null|
+  | _NULL_| 1  | 1  | Row1 | r=1表示在Name处进行重复, d=1, 表示此时Name.Language = null|
+  | gb    | 1  | 3  | Row1 | r=1表示在Names处进行重复, d=Max definition(3), 表示[Name, Language, Code] 此时为[gb]|
+  | _NULL_| 0  | 1  | Row2 | r=0创建新的Row2, d=1 表示第一级为 NULL, 即Name.Language=NULL|
+
+- [Name, Url]
+  | value       | r  | d  | Row  ||
+  | ----        | -- | -- | ---  | --- |
+  | http://A    | 0  | 2  | Row1 | r=0, 创建 Row1, d=Max definition(2), 表示[Name, Url] 此时为[http://A]|
+  | http://B    | 1  | 2  | Row1 | r=1表示在Name处进行重复, d=2, 表示此时[Name, Url] = [http://B]|
+  | _NULL_      | 1  | 1  | Row1 | r=1表示在Name处进行重复, d=1, 表示此时Name.Url = null|
+  | http://C    | 0  | 2  | Row2 | r=0创建新的Row2, d=Max definition(2), 表示[Name, Url] 此时为[http://C]|
 
 Parquet 通过 definition 和 repetition 可以很好的表示如 List/Sets/Map 这样的数据类型.
 
@@ -185,7 +200,6 @@ Parquet 通过 definition 和 repetition 可以很好的表示如 List/Sets/Map 
 Definition 可以用于表示哪个字段为 null. 一个字段的 definition 的范围为 0 (root schema) 到该字段的最大深度.
 
 ### Repetition
-
 
 ## 生成 Parquet 文件的流程
 
