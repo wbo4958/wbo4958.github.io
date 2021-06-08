@@ -90,6 +90,7 @@ parent: Parquet
     System.out.println(schema);
     writer.write(group);
     writer.write(group1);
+    writer.close();
 ```
 
 ## Schema
@@ -114,7 +115,21 @@ MessageType schema = MessageTypeParser.parseMessageType(
 - optional: 表示该字段出现 0 次或 1 次
 - repeated: 表示该字段出现 0 次或 多次
 
-可以通过下面的计算获得一个Primitive column的最大 definition与repetition
+### repetition与definition
+
+数据本身是无法表达一行的结构信息， 如 [Name, Language, Code]中包含2个repeated字段, Name和Language都可以多次重复，
+而所有Code数据是 flatten 到一个column中的，光靠 Code 我们无法得知到底Code是属于哪个Name.Language.
+
+Google dremel 引入了 repetition 概念, [Name, Language, Code]包含 2 个 repeated字段 (Name 和 Language), 因此Code
+的 repetition level 范围是  0~2, 0 表示创建一个新的Row, 1表示在Names处重复, 2表示在Names.Language重复.
+
+对于数据在哪层上为 NULL, dremel同样引入了 defintition level 来表示
+
+如 [Name, Language, County], 它的最大 definition level 为 3 (Name是repeated, Language也是repeated, Code为 optional)
+当 Code 有值时，它的 definition=Max Definition(3), 当 Code 没有值时, d=2表示 Name.Language有定义但是Code=NULL,
+d=1表示 Name有定义但是Name.Language=NULL, d=0时，表示Name=NULL.
+
+可以通过下面的计算可以获得一个Primitive column的最大 definition与repetition
 
 ``` c
 Max Definition = sizeof(optional) + sizeof(repeated)
@@ -133,25 +148,29 @@ Max Repetition = sizeof(repeated)
 以数据为例
 
 - [DocId]
+
   | value | r  | d  |
-  | ----  | -- | -- |
+  | ----  | --- | --- |
   | 10    | 0  | 0  |
   | 20    | 0  | 0  |
 
   对于 `required int32 DocId`, r/d 没有意义, 它必须存在且不能为空.
 
 - [Links, Backward]
+
   | value | r  | d  |
   | ----  | -- | -- |
   | NULL  | 0  | 1  |
   | 10    | 0  | 2  |
   | 30    | 1  | 2  |
 
-  Links 声明为 Optional, 最多只出现 1 次, 而 Backward声明为 repeated, 可以出现多次.
+  Links 声明为 Optional, 最多只出现 1 次, 而 Backward声明为 repeated, 可以出现多次. Links.Backward 包含一个 repeated 字段
+  因此它的 repetition level 范围是 0~1, 0表明创建一个新的行, 1表示在 Links.Backward 重复.
   
-  r=0表示创建一个新的行, r=1表示在第一级Links.Backward进行重复, d=1 表示该行为 NULL, d=Max_Definition_Level 表示该行是有值的.
+  d=1 表示 Links.Backward = NULL, d=Max_Definition_Level 表示该行是有值的.
 
 - [Links, Forward]
+
   | value | r  | d  | Row  ||
   | ----  | -- | -- | ---  | --- |
   | 20    | 0  | 2  | Row1 | r=0 表示创建 Row1, d=Max definition(2) 表示[Links, Forward]此时为 [20] |
@@ -159,11 +178,8 @@ Max Repetition = sizeof(repeated)
   | 60    | 1  | 2  | Row1 | r=1 表示在Forward处重复, 即添加一个新元素, d=Max definition(2), 表示[Links, Forward]此时为 [20, 40, 60]|
   | 80    | 0  | 2  | Row2 | r=0 表示创建 Row2, d=Max definition(2), 表示[Links, Forward] 此时为 [80]|
 
-  Links 声明为 Optional, 最多只出现 1 次, 而 Forward 声明为 repeated, 可以出现多次.
-  
-  r=0 表示创建一个新的行, r=1表示在第一级进行重复这里是 Links.Forward进行重复(因为Links不是repeated), d=1 表示第一层为 NULL, d=Max_Definition_Level(该值为2) 表示该行是有值的.
-
 - [Name, Language, Code]
+
   | value | r  | d  | Row  ||
   | ----  | -- | -- | ---  | --- |
   | en-us | 0  | 2  | Row1 | r=0, 创建 Row1, d=Max definition(2), 表示[Name, Language, Code] 此时为[en-us]|
@@ -172,11 +188,8 @@ Max Repetition = sizeof(repeated)
   | en-gb | 1  | 2  | Row1 | r=1表示在Names处进行重复, d=Max definition(2), 表示此时Name.Language.Code=[en-gb]|
   | _NULL_| 0  | 1  | Row2 | r=0, 创建新的Row2, d=1 表示第一级为 NULL, 即 Name.Language=NULL|
 
-  Name 声明为 repeated, 可以出现多次, Language也声明为 repeated 也是可以出现多次,
-  当 r=0时，表示创建新的Row, r=1时表示在 Names处进行重复, r=2时表示在 Names.Language处重复
-  而 Code 声明为 required, 只能出现一次，即如果 d=Max definition时, Code值有效.
-
 - [Name, Language, County]
+
   | value | r  | d  | Row  ||
   | ----  | -- | -- | ---  | --- |
   | us    | 0  | 3  | Row1 | r=0, 创建 Row1, d=Max definition(3), 表示[Name, Language, Code] 此时为[us]|
@@ -186,20 +199,13 @@ Max Repetition = sizeof(repeated)
   | _NULL_| 0  | 1  | Row2 | r=0创建新的Row2, d=1 表示第一级为 NULL, 即Name.Language=NULL|
 
 - [Name, Url]
+
   | value       | r  | d  | Row  ||
   | ----        | -- | -- | ---  | --- |
   | http://A    | 0  | 2  | Row1 | r=0, 创建 Row1, d=Max definition(2), 表示[Name, Url] 此时为[http://A]|
   | http://B    | 1  | 2  | Row1 | r=1表示在Name处进行重复, d=2, 表示此时[Name, Url] = [http://B]|
   | _NULL_      | 1  | 1  | Row1 | r=1表示在Name处进行重复, d=1, 表示此时Name.Url = null|
   | http://C    | 0  | 2  | Row2 | r=0创建新的Row2, d=Max definition(2), 表示[Name, Url] 此时为[http://C]|
-
-Parquet 通过 definition 和 repetition 可以很好的表示如 List/Sets/Map 这样的数据类型.
-
-### Definition
-
-Definition 可以用于表示哪个字段为 null. 一个字段的 definition 的范围为 0 (root schema) 到该字段的最大深度.
-
-### Repetition
 
 ## 生成 Parquet 文件的流程
 
@@ -212,9 +218,11 @@ Definition 可以用于表示哪个字段为 null. 一个字段的 definition �
 
 ## ParquetWriter.write
 
-Parquet.write 是典型的生产者消费者设计模式. ParquetWriter.write 将一行数据交给 MessageColumnIORecordConsumer 去消费. MessageColumnIORecordConsumer 通过每列的 ColumnWriterV2 将每行每列数据写入到 ValuesWriter 中. MessageColumnIORecordConsumer 一次只能消费一行的数据.
+Parquet.write 是典型的生产者消费者设计模式. ParquetWriter.write 将一行数据交给 MessageColumnIORecordConsumer 去消费.
+MessageColumnIORecordConsumer 通过每列的 ColumnWriterV2 将每行每列数据写入到 ValuesWriter 中.
+MessageColumnIORecordConsumer 一次只能消费一行的数据.
 
-ColumnWriterV2 中有三个 ValuesWriter, 分别为 repetition levels, definition level, dataColumn. 后面会单独分析什么是 repetition 和 definition
+ColumnWriterV2 中有三个 ValuesWriter, 分别为 repetition levels, definition level, dataColumn.
 
 dataColumn field type 相对应的 ValuesWriter 实现类，如下所示
 
@@ -228,7 +236,8 @@ dataColumn field type 相对应的 ValuesWriter 实现类，如下所示
 |DOUBLE|FallbackValuesWriter|PlainDoubleDictionaryValuesWriter|DoubleByteStreamSplitValuesWriter or PlainValuesWriter|
 |FLOAT|FallbackValuesWriter|PlainFloatDictionaryValuesWriter|FloatByteStreamSplitValuesWriter or PlainValuesWriter|
 
-当 dataColumn 为 FallbackValuesWriter 时. 首先会通过 initialWriter 对数据进行 encoding, 如果最后 encoding 出来的数据字节数据大于原始的数据时， 则会 fallback 到 fallBackWriter 重新对数据进行 encoding.
+当 dataColumn 为 FallbackValuesWriter 时. 首先会通过 initialWriter 对数据进行 encoding, 如果最后 encoding
+出来的数据字节数据大于原始的数据时， 则会 fallback 到 fallBackWriter 重新对数据进行 encoding.
 
 以 INT32 所对应的 PlainIntegerDictionaryValuesWriter 为例.
 
@@ -254,7 +263,10 @@ intDictionaryContent: 21111111->0,  390909090->1, 47766521212->2
 encodedValues: 0 0 1 1 2
 ```
 
-这种编码方式有什么好处? 这种编译可以将很大的数据通过很小的数据进行表示, 如上所示, 21111111至少需要7个字节，而通过映射后 0 就可以表示 21111111. 而对于小的数可以用 bit 位来表示， 如上图的  `0 0 1 1 2` 只需要2个bit位就可以表示最大的值，因此可以用 2个字节 (其中10位) 就可表示该编码. 大大的节省的空间.
+这种编码方式有什么好处呢? 这种编译可以将很大的数据通过很小的数据进行表示, 如上所示,
+21111111至少需要7个字节，而通过映射后 0 就可以表示 21111111. 而对于小的数可以用
+bit 位来表示， 如上图的  `0 0 1 1 2` 只需要2个bit位就可以表示最大的值，因此可以用
+2个字节 (其中10位) 就可表示该编码. 大大的节省的空间.
 
 `2 << 8 | 1 << 6 | 1 << 4 | 0 << 2 | 0`
 
@@ -262,15 +274,19 @@ encodedValues: 0 0 1 1 2
 
 ## ParquetWriter.close 将数据写入到文件
 
-ParquetWriter.close 有两个作用， 一个是 flushRowGroupToStore 将 RowGroups 写入到文件， 另一个是将 ColumnIndex/OffsettIndex 以及 Footer 等写入到文件.
+ParquetWriter.close 有两个作用， 一个是 flushRowGroupToStore 将 RowGroups 写入到文件,
+另一个是将 ColumnIndex/OffsettIndex 以及 Footer 等写入到文件.
 
 ### flushRowGroupToStore
 
-ParquetWriter.write 仅仅是将数据写入到 initalWriter 中(这里假设 ParquetWriter.write时不会分页和分RowGroup, 实际上是可能分页和分RowGroup的), 并没有生成最后的数据字节流. 而 flushRowGroupToStore 将会生成最后的 RowGroup 最终数据, 并将 RowGroup 写入到文件中.
+ParquetWriter.write 仅仅是将数据写入到 initalWriter 中(这里假设 ParquetWriter.write时不会分页和分RowGroup,
+实际上是可能分页和分RowGroup的), 并没有生成最后的数据字节流. 而 flushRowGroupToStore 将会生成最后的
+RowGroup 最终数据, 并将 RowGroup 写入到文件中.
 
 1. ColumnWriteStoreV2 生成 page 数据 和 dictionaryPage 数据
 
-    ColumnWriterStoreV2.flush 触发所有列的 ColumnWriterV2 将 repetition/definition/data 通过writePage写入到 Page中, 然后再写入  DictionaryPage.
+    ColumnWriterStoreV2.flush 触发所有列的 ColumnWriterV2 将 repetition/definition/data 通过writePage写入到 Page中,
+    然后再写入 DictionaryPage.
 
     ``` java
     public void flush() {
@@ -310,7 +326,8 @@ ParquetWriter.write 仅仅是将数据写入到 initalWriter 中(这里假设 Pa
 
       以 INT32 为例, dataColumn是FallbackValuesWriter, 首先触发 initialWriter.getBytes 获得编码后的数据字节流.
 
-      getBytes 首先通过 RunLengthBitPackingHybridEncoder 将 DictionaryValuesWriter 里的 encodedValues 执行 RunLength以及BitPacking 混合编码方式获得最后的数据字节.
+      getBytes 首先通过 RunLengthBitPackingHybridEncoder 将 DictionaryValuesWriter 里的 encodedValues 执行
+      RunLength以及BitPacking 混合编码方式获得最后的数据字节.
 
       RunLengthBitPackingHybridEncoder 算法如下所示
 
@@ -320,7 +337,9 @@ ParquetWriter.write 仅仅是将数据写入到 initalWriter 中(这里假设 Pa
 
       ![parquet-runlenbitpack](/docs/parquet/parquet-writer/parquet-runlenbitpack.svg)
 
-      如果 initalWriter 对数据索引(encodedValues)编码后的字节大小 encodedSize 与 dictionaryByteSize (真实的数据) 之和 大于原始的数据字节大小，则说明 initialWriter 的编码方式不优，这时候触发 fallBackWriter. 注意， fallback 只在写第一个 Page 的时候才有可能触发，如果已经触发 fallback 了，写后面的page时，都使用 fallback 编码.
+      如果 initalWriter 对数据索引(encodedValues)编码后的字节大小 encodedSize 与 dictionaryByteSize (真实的数据)
+      之和 大于原始的数据字节大小，则说明 initialWriter 的编码方式不优，这时候触发 fallBackWriter. 注意， fallback
+      只在写第一个 Page 的时候才有可能触发，如果已经触发 fallback 了，写后面的page时，都使用 fallback 编码.
 
       ``` java
       public boolean isCompressionSatisfying(long rawSize, long encodedSize) {
@@ -395,7 +414,8 @@ ParquetWriter.write 仅仅是将数据写入到 initalWriter 中(这里假设 Pa
 
     - writeDictionaryPage 获得 Dictionary 字节流
 
-      RunLengthBitPackingHybridEncoder编码 只对数据在 Dictionary 的索引进行编码，它并不知道真正的数据是什么，所以需要在 Parquet 文件中记录真实的数据, 也就是 Dictionary 的数据.
+      RunLengthBitPackingHybridEncoder编码 只对数据在 Dictionary 的索引进行编码，它并不知道真正的数据是什么,
+      所以需要在 Parquet 文件中记录真实的数据, 也就是 Dictionary 的数据.
 
       如上面 RunLengthBitPackingHybridEncoder sample 所示，对于下面数据，它的 Dictionary 数据为
 
@@ -436,8 +456,6 @@ ParquetWriter.write 仅仅是将数据写入到 initalWriter 中(这里假设 Pa
 
 how to split page
 how to split row group
-repetition level
-definition levlel.
 
 ## reference
 

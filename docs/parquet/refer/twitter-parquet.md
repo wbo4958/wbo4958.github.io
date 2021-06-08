@@ -1,4 +1,18 @@
-# Dremel made simple with Parquet
+---
+layout: page
+title: twitter parquet blog
+nav_order: 105
+parent: Parquet
+---
+
+# Dremel made simple with parquet
+{: .no_toc}
+
+## 目录
+{: .no_toc .text-delta}
+
+1. TOC
+{:toc}
 
 Columnar storage is a popular technique to optimize analytical workloads in parallel RDBMs. The performance and compression benefits for storing and processing large amounts of data are well documented in academic literature as well as several commercial analytical databases.
 
@@ -228,4 +242,4 @@ Parquet is still a young project; to learn more about the project see our README
 
 You can also join our mailing list and tweet at @ApacheParquet to join the discussion.
 
-Copied from https://blog.twitter.com/engineering/en_us/a/2013/dremel-made-simple-with-parquet.html
+Copied from [https://blog.twitter.com/engineering/en_us/a/2013/dremel-made-simple-with-parquet.html](https://blog.twitter.com/engineering/en_us/a/2013/dremel-made-simple-with-parquet.html)
