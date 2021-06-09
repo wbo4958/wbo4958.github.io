@@ -121,7 +121,7 @@ MessageType schema = MessageTypeParser.parseMessageType(
 而所有Code数据是 flatten 到一个column中的，光靠 Code 我们无法得知到底Code是属于哪个Name.Language.
 
 Google dremel 引入了 repetition 概念, [Name, Language, Code]包含 2 个 repeated字段 (Name 和 Language), 因此Code
-的 repetition level 范围是  0~2, 0 表示创建一个新的Row, 1表示在Names处重复, 2表示在Names.Language重复.
+的 repetition level 范围是 0~2, 0 表示创建一个新的Row, 1表示在Names处重复, 2表示在Names.Language重复.
 
 对于数据在哪层上为 NULL, dremel同样引入了 defintition level 来表示
 
@@ -166,7 +166,7 @@ Max Repetition = sizeof(repeated)
 
   Links 声明为 Optional, 最多只出现 1 次, 而 Backward声明为 repeated, 可以出现多次. Links.Backward 包含一个 repeated 字段
   因此它的 repetition level 范围是 0~1, 0表明创建一个新的行, 1表示在 Links.Backward 重复.
-  
+
   d=1 表示 Links.Backward = NULL, d=Max_Definition_Level 表示该行是有值的.
 
 - [Links, Forward]
@@ -211,10 +211,21 @@ Max Repetition = sizeof(repeated)
 
 ![parquet-write_flow](/docs/parquet/parquet-writer/parquet-write_flow.svg)
 
-- ColumnChunkPageWriterStore 为每个列创建 PageWriter, 管理所有列的 PageWriter.
-- ColumnWriteStoreV2 V2 版的 ColumnWriteStore, 为每个列创建 ColumnWriterV2, 管理所有的列的 ColumnWriterV2.
-- MessageColumnIORecordConsumer 通过 ColumnWriterV2 将一行中每列数据写入到每列对应的 ValuesWriters 中
-- ColumnWriterV2 每列的 Writer, 分别保存 repetition level, definition level, 数据以及 Statistic.
+- ColumnChunkPageWriterStore
+
+  为每个列创建 PageWriter, 管理所有列的 PageWriter.
+
+- ColumnWriteStoreV2
+
+  V2 版的 ColumnWriteStore, 为每个列创建 ColumnWriterV2, 管理所有的列的 ColumnWriterV2.
+
+- MessageColumnIORecordConsumer
+
+  通过 ColumnWriterV2 将一行中每列数据写入到每列对应的 ValuesWriters 中
+
+- ColumnWriterV2
+
+  每列的 Writer, 分别保存 repetition level, definition level, 数据以及 Statistic.
 
 ## ParquetWriter.write
 
@@ -222,13 +233,15 @@ Parquet.write 是典型的生产者消费者设计模式. ParquetWriter.write �
 MessageColumnIORecordConsumer 通过每列的 ColumnWriterV2 将每行每列数据写入到 ValuesWriter 中.
 MessageColumnIORecordConsumer 一次只能消费一行的数据.
 
-ColumnWriterV2 中有三个 ValuesWriter, 分别为 repetition levels, definition level, dataColumn.
+ColumnWriterV2 中有三个 ValuesWriter, 分别为 dataColumn, repetition levels, definition level.
 
-dataColumn field type 相对应的 ValuesWriter 实现类，如下所示
+### dataColumn
 
-| 列的类型 |  |initialWriter|fallBackWriter|
-| --- | --- | --- | --- |
-| BOOLEAN | RunLengthBitPackingHybridValuesWriter |||
+dataColumn 用于保存真实的数据, 它会根据 column type 不同 ValuesWriter也不相同，如下所示
+
+| column type | dataColumn |initialWriter|fallBackWriter|
+| ---         | ---        | ---         | ---          |
+| BOOLEAN | RunLengthBitPackingHybridValuesWriter |无|无|
 | FIXED_LEN_BYTE_ARRAY | FallbackValuesWriter | PlainFixedLenArrayDictionaryValuesWriter|DeltaByteArrayWriter|
 |BINARY|FallbackValuesWriter|PlainBinaryDictionaryValuesWriter|DeltaByteArrayWriter|
 |INT32|FallbackValuesWriter|PlainIntegerDictionaryValuesWriter|DeltaBinaryPackingValuesWriterForInteger|
@@ -237,18 +250,18 @@ dataColumn field type 相对应的 ValuesWriter 实现类，如下所示
 |FLOAT|FallbackValuesWriter|PlainFloatDictionaryValuesWriter|FloatByteStreamSplitValuesWriter or PlainValuesWriter|
 
 当 dataColumn 为 FallbackValuesWriter 时. 首先会通过 initialWriter 对数据进行 encoding, 如果最后 encoding
-出来的数据字节数据大于原始的数据时， 则会 fallback 到 fallBackWriter 重新对数据进行 encoding.
+出来的数据字节数大于原始的字节数时， 则会 fallback 到 fallBackWriter 重新对数据进行 encoding.
 
 以 INT32 所对应的 PlainIntegerDictionaryValuesWriter 为例.
 
 ``` java
 public void writeInteger(int v) {
   // 检查数据是否已经存在, 如果存在则返回数据在intDictionaryContent的索引, 如果不存在则返回 -1
-  int id = intDictionaryContent.get(v); 
+  int id = intDictionaryContent.get(v);
   if (id == -1) { // 不存在
     id = intDictionaryContent.size(); //生成数据与之对应的 index
     intDictionaryContent.put(v, id); //将数据加入到 intDictionaryContent
-    dictionaryByteSize += 4; // 更新  intDictionaryContent 中数据的字节数 
+    dictionaryByteSize += 4; // 更新 intDictionaryContent 中数据的字节数
   }
   encodedValues.add(id); //encodedValues依次记录数据在 intDictionaryContent 中的索引
 }
@@ -259,13 +272,15 @@ public void writeInteger(int v) {
 ``` console
 21111111, 21111111, 390909090, 390909090, 47766521212
 
-intDictionaryContent: 21111111->0,  390909090->1, 47766521212->2
+intDictionaryContent: 21111111->0, 390909090->1, 47766521212->2
 encodedValues: 0 0 1 1 2
 ```
 
-这种编码方式有什么好处呢? 这种编译可以将很大的数据通过很小的数据进行表示, 如上所示,
+这种编码方式有什么好处呢?
+
+这种编码可以将很大的数据通过很小的数据进行表示, 如上所示,
 21111111至少需要7个字节，而通过映射后 0 就可以表示 21111111. 而对于小的数可以用
-bit 位来表示， 如上图的  `0 0 1 1 2` 只需要2个bit位就可以表示最大的值，因此可以用
+bit 位来表示， 如上图的 `0 0 1 1 2` 只需要2个bit位就可以表示最大的值，因此可以用
 2个字节 (其中10位) 就可表示该编码. 大大的节省的空间.
 
 `2 << 8 | 1 << 6 | 1 << 4 | 0 << 2 | 0`
@@ -295,7 +310,7 @@ RowGroup 最终数据, 并将 RowGroup 写入到文件中.
         if (rows > 0) {
           memColumn.writePage(rowCount); //先将page保存到PageWriter里的 buffer 中
         }
-        memColumn.finalizeColumnChunk(); // 再生成 Dictionary 数据 
+        memColumn.finalizeColumnChunk(); // 再生成 Dictionary 数据
       }
     }
     ```
@@ -360,7 +375,7 @@ RowGroup 最终数据, 并将 RowGroup 写入到文件中.
           Encoding dataEncoding, BytesInput data,
           Statistics<?> statistics) throws IOException {
         pageOrdinal++;
-        
+
         int rlByteLength = toIntWithCheck(repetitionLevels.size()); //repetition level长度
         int dlByteLength = toIntWithCheck(definitionLevels.size()); //definition level
         int uncompressedSize = toIntWithCheck(
@@ -390,7 +405,7 @@ RowGroup 最终数据, 并将 RowGroup 写入到文件中.
         this.uncompressedLength += uncompressedSize; //记录所有的 uncompressedLength
         this.compressedLength += compressedSize; // 记录所有的 compressedLength
         this.totalValueCount += valueCount; //记录所有的行数
-        this.pageCount += 1;  //记录所有的 page count
+        this.pageCount += 1; //记录所有的 page count
         // Copying the statistics if it is not initialized yet so we have the correct typed one
         if (totalStatistics == null) {
           totalStatistics = statistics.copy();
@@ -421,7 +436,7 @@ RowGroup 最终数据, 并将 RowGroup 写入到文件中.
 
       ``` console
       value: 7 7 7 7 7 7 7 7 7 3 7 7 7 7 7 7 7 7 2 3 3 2 3 2 8 8 8 8 8 8 8 8 8
-      dictionary bytes:  7 0 0 0 3 0 0 0 2 0 0 0 8 0 0 0 //一个数据点4个字节
+      dictionary bytes: 7 0 0 0 3 0 0 0 2 0 0 0 8 0 0 0 //一个数据点4个字节
       ```
 
 2. writeToFileWriter 将 dictionary 和 page 数据写入到文件中
@@ -437,7 +452,7 @@ RowGroup 最终数据, 并将 RowGroup 写入到文件中.
     serializeOffsetIndexes(offsetIndexes, blocks, out, fileEncryptor); //写入 OffsetIndex
     serializeBloomFilters(bloomFilters, blocks, out, fileEncryptor); // 写入 BloomFilters
     LOG.debug("{}: end", out.getPos());
-    this.footer = new ParquetMetadata(new FileMetaData(schema, extraMetaData, Version.FULL_VERSION), blocks); 
+    this.footer = new ParquetMetadata(new FileMetaData(schema, extraMetaData, Version.FULL_VERSION), blocks);
     serializeFooter(footer, out, fileEncryptor); // 写入 Footer
     out.close();
   }
