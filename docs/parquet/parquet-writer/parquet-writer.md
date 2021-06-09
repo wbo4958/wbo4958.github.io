@@ -235,7 +235,7 @@ Parquet.write 是典型的生产者消费者设计模式. ParquetWriter.write �
 MessageColumnIORecordConsumer 通过每列的 ColumnWriterV2 将每行每列数据写入到 ValuesWriter 中.
 MessageColumnIORecordConsumer 一次只能消费一行的数据.
 
-ColumnWriterV2 中有三个 ValuesWriter, 分别为 dataColumn, repetition levels, definition level.
+ColumnWriterV2 中有三个 ValuesWriter, 分别为 dataColumn, repetitionColumn, definitionColumn.
 
 ### dataColumn
 
@@ -296,6 +296,10 @@ bit 位来表示， 如上图的 `0 0 1 1 2` 只需要2个bit位就可以表示�
 RunLengthBitPackingHybridEncoder 这么做的.
 
 而数据的真实值此时保存在 intDictionaryContent 中， 最后将 intDictionaryContent 保存到该列的 DictionaryPage 中
+
+### repetitionColumn/definitionColumn
+
+repetition与definition都是使用 RunLengthBitPackingHybridEncoder 编码方式，见上面的分析.
 
 ## ParquetWriter.close 将数据写入到文件
 
