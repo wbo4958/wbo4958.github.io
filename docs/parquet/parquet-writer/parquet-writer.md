@@ -115,6 +115,8 @@ MessageType schema = MessageTypeParser.parseMessageType(
 - optional: 表示该字段出现 0 次或 1 次
 - repeated: 表示该字段出现 0 次或 多次
 
+![Message Type](/docs/parquet/parquet-writer/parquet-MessageType.svg)
+
 ### repetition与definition
 
 数据本身是无法表达一行的结构信息， 如 [Name, Language, Code]中包含2个repeated字段, Name和Language都可以多次重复，
@@ -237,7 +239,7 @@ ColumnWriterV2 中有三个 ValuesWriter, 分别为 dataColumn, repetition level
 
 ### dataColumn
 
-dataColumn 用于保存真实的数据, 它会根据 column type 不同 ValuesWriter也不相同，如下所示
+dataColumn 用于保存实际的数据, 它会根据 column type 选择不同 ValuesWriter，如下所示
 
 | column type | dataColumn |initialWriter|fallBackWriter|
 | ---         | ---        | ---         | ---          |
@@ -249,10 +251,15 @@ dataColumn 用于保存真实的数据, 它会根据 column type 不同 ValuesWr
 |DOUBLE|FallbackValuesWriter|PlainDoubleDictionaryValuesWriter|DoubleByteStreamSplitValuesWriter or PlainValuesWriter|
 |FLOAT|FallbackValuesWriter|PlainFloatDictionaryValuesWriter|FloatByteStreamSplitValuesWriter or PlainValuesWriter|
 
+ValuesWriter 的类继承图如下所示
+
+![parquet](/docs/parquet/parquet-writer/valueswriter.png)
+
 当 dataColumn 为 FallbackValuesWriter 时. 首先会通过 initialWriter 对数据进行 encoding, 如果最后 encoding
 出来的数据字节数大于原始的字节数时， 则会 fallback 到 fallBackWriter 重新对数据进行 encoding.
 
-以 INT32 所对应的 PlainIntegerDictionaryValuesWriter 为例.
+以 INT32 所对应的 PlainIntegerDictionaryValuesWriter 为例. PlainIntegerDictionaryValuesWriter 继承于 DictionaryValuesWriter,
+它将实际的数据映射到从0开始的较小的数,
 
 ``` java
 public void writeInteger(int v) {
@@ -279,18 +286,23 @@ encodedValues: 0 0 1 1 2
 这种编码方式有什么好处呢?
 
 这种编码可以将很大的数据通过很小的数据进行表示, 如上所示,
-21111111至少需要7个字节，而通过映射后 0 就可以表示 21111111. 而对于小的数可以用
+21111111至少需要7个字节，而通过映射后 0 就可以表示 21111111. 而对于较小的数可以用
 bit 位来表示， 如上图的 `0 0 1 1 2` 只需要2个bit位就可以表示最大的值，因此可以用
 2个字节 (其中10位) 就可表示该编码. 大大的节省的空间.
 
 `2 << 8 | 1 << 6 | 1 << 4 | 0 << 2 | 0`
 
-实际上在 DictionaryValuesWriter 里在获得最后的 bytes时, 就是通过 RunLengthBitPackingHybridEncoder 这么做的
+实际上在 DictionaryValuesWriter.getBytes() 里在获得bytes时, 就是通过
+RunLengthBitPackingHybridEncoder 这么做的.
+
+而数据的真实值此时保存在 intDictionaryContent 中， 最后将 intDictionaryContent 保存到该列的 DictionaryPage 中
 
 ## ParquetWriter.close 将数据写入到文件
 
-ParquetWriter.close 有两个作用， 一个是 flushRowGroupToStore 将 RowGroups 写入到文件,
-另一个是将 ColumnIndex/OffsettIndex 以及 Footer 等写入到文件.
+ParquetWriter.close 有两个作用，
+
+- 一个是 flushRowGroupToStore 将 RowGroups 写入到文件,
+- 另一个是将 ColumnIndex/OffsettIndex 以及 Footer 等写入到文件.
 
 ### flushRowGroupToStore
 
@@ -300,7 +312,7 @@ RowGroup 最终数据, 并将 RowGroup 写入到文件中.
 
 1. ColumnWriteStoreV2 生成 page 数据 和 dictionaryPage 数据
 
-    ColumnWriterStoreV2.flush 触发所有列的 ColumnWriterV2 将 repetition/definition/data 通过writePage写入到 Page中,
+    ColumnWriterStoreV2.flush 触发所有列的 ColumnWriterV2 将 repetition/definition/dataColumn 通过writePage写入到 Page中,
     然后再写入 DictionaryPage.
 
     ``` java
@@ -352,7 +364,7 @@ RowGroup 最终数据, 并将 RowGroup 写入到文件中.
 
       ![parquet-runlenbitpack](/docs/parquet/parquet-writer/parquet-runlenbitpack.svg)
 
-      如果 initalWriter 对数据索引(encodedValues)编码后的字节大小 encodedSize 与 dictionaryByteSize (真实的数据)
+      如果 initalWriter 对数据索引(encodedValues)编码后的字节大小 encodedSize 与 dictionaryByteSize (真实的数据大小)
       之和 大于原始的数据字节大小，则说明 initialWriter 的编码方式不优，这时候触发 fallBackWriter. 注意， fallback
       只在写第一个 Page 的时候才有可能触发，如果已经触发 fallback 了，写后面的page时，都使用 fallback 编码.
 
@@ -443,7 +455,8 @@ RowGroup 最终数据, 并将 RowGroup 写入到文件中.
 
 ### 写入 ColumnIndex/OffsetIndex以及 Footer
 
-当把所有的RowGroup写入到文件后，紧接着需要写入 ColumnIndex/OffsetIndex 以及整个 parquet 文件的 Footer 信息了
+当把所有的RowGroup写入到文件后，紧接着需要写入 ColumnIndex (每个 Page里每列的统计信息)/OffsetIndex(每个Page中每列的 offset信息)
+以及整个 parquet 文件的 Footer 信息了.
 
 ``` java
   public void end(Map<String, String> extraMetaData) throws IOException {
@@ -451,27 +464,21 @@ RowGroup 最终数据, 并将 RowGroup 写入到文件中.
     serializeColumnIndexes(columnIndexes, blocks, out, fileEncryptor); //写入 ColumnIndex
     serializeOffsetIndexes(offsetIndexes, blocks, out, fileEncryptor); //写入 OffsetIndex
     serializeBloomFilters(bloomFilters, blocks, out, fileEncryptor); // 写入 BloomFilters
-    LOG.debug("{}: end", out.getPos());
     this.footer = new ParquetMetadata(new FileMetaData(schema, extraMetaData, Version.FULL_VERSION), blocks);
     serializeFooter(footer, out, fileEncryptor); // 写入 Footer
     out.close();
   }
 ```
 
-### Properties
+## Parquet format
 
-|Parquet文件的配置项|默认值|意义|
-|---|----|----|
-|minRowCountForPageSizeCheck| 10 | 每当写入多少行后开始检查是否需要将数据写入到 Page. 因为 ColumnWriterV2将数据写入内存，当写入数据非常多时可能会OOM,所以设置一个值去多久去检查remaining mem, 以及 是否到pageRowCountLimit|
-|pageRowCountLimit|20,000| 每个page 的行数 |
-|pageSizeThreshold|1K| page 的大小|
-|dictionaryPageSizeThreshold| dictionary page大小|
+最后整个 Parquet 文件的格式如下所示
 
-## TODO
-
-how to split page
-how to split row group
+![parquet](/docs/parquet/parquet-writer/parquet-finaldata.svg)
 
 ## reference
 
-https://yoelee.github.io/2018/04/08/2018-04-06_%E5%88%97%E5%BC%8F%E5%AD%98%E5%82%A8_Parquet/
+- [https://static.googleusercontent.com/media/research.google.com/en//pubs/archive/36632.pdf](https://static.googleusercontent.com/media/research.google.com/en//pubs/archive/36632.pdf
+)
+- [https://blog.twitter.com/engineering/en_us/a/2013/dremel-made-simple-with-parquet.html](https://blog.twitter.com/engineering/en_us/a/2013/dremel-made-simple-with-parquet.html)
+- [https://bigdata.devcodenote.com/2015/04/parquet-file-format.html](https://bigdata.devcodenote.com/2015/04/parquet-file-format.html)
