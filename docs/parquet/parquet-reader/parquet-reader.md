@@ -50,9 +50,13 @@ parent: Parquet
     }
 ```
 
-流程图如下所示
+Parquet read 的流程图如下所示
 
 ![parquet read](/docs/parquet/parquet-reader/parquet-read-ParquetReader.svg)
+
+Dremel demo 的 Parquet 文件的格式
+
+![dremel format](/docs/parquet/parquet-reader/parquet-read-dremel-format.svg)
 
 ## FushDown filer - RowGroup filter
 
@@ -87,11 +91,14 @@ Dictionary Statistics 会将所有的真实数据取出来，然后依次与 fil
 
 ### BloomFilter
 
-如果 column 有大量离散的数据时, 一般不会采用 Dictionary 编码, 此时也就没有 Dictionary Statistics. Parquet 引入了 BloomFilter. 可以参考下面几篇文章.
+如果 column 有大量离散的数据时, 不会使用 Dictionary 编码, 此时也就没有 Dictionary Statistics.
+Parquet 引入了 BloomFilter. 可以参考下面几篇文章.
 
 - [布隆过滤器，这一篇给你讲的明明白白](https://developer.aliyun.com/article/773205)
 - [https://github.com/apache/parquet-format/blob/master/BloomFilter.md](https://github.com/apache/parquet-format/blob/master/BloomFilter.md)
 - [https://www.cnblogs.com/liyulong1982/p/6013002.html](https://www.cnblogs.com/liyulong1982/p/6013002.html)
+
+根据  Bloom Filter 的定义，其只适用于 equal 和 not equal 的 filter.
 
 ## Column prune
 
