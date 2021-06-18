@@ -277,25 +277,25 @@ public void writeInteger(int v) {
 如有以下数据
 
 ``` console
-21111111, 21111111, 390909090, 390909090, 47766521212
+21111111, 21111111, 390909090, 390909090, 47766521212, 21111111, 390909090, 47766521212 ...
 
 intDictionaryContent: 21111111->0, 390909090->1, 47766521212->2
-encodedValues: 0 0 1 1 2
+encodedValues: 0 0 1 1 2 0 1 2
 ```
 
-这种编码方式有什么好处呢?
+这种 Dictionary 编码方式有什么好处呢?
 
-这种编码可以将很大的数据通过很小的数据进行表示, 如上所示,
-21111111至少需要7个字节，而通过映射后 0 就可以表示 21111111. 而对于较小的数可以用
-bit 位来表示， 如上图的 `0 0 1 1 2` 只需要2个bit位就可以表示最大的值，因此可以用
-2个字节 (其中10位) 就可表示该编码. 大大的节省的空间.
+这种编码可以将所有 uniq 后的数据映射到很小的数据上, 如上所示,如通过映射后, 0 就可以表示 21111111. 而对于较小的数可以用
+bit 位来表示， 如上图的 `0 0 1 1 2 0 1 2` 最大数为 2, 只需要2个bit位就可以表示一个数，因此可以用
+2个字节 (16个 bit) 就可表示该映射后的编码. 另外还需要额外保存　uniq 过的原数据即 `21111111, 390909090, 47766521212`,
+以便于从 encoded values 反推回原数.
 
-`2 << 8 | 1 << 6 | 1 << 4 | 0 << 2 | 0`
+因此经过 Dictionary 编码后, 最多使用 `2 + 3*8 = 26` 个字节就可以保存, 而如果不需要 Dictionary 编码的话则需要的 `8*8 = 64` 个字节.
 
-实际上在 DictionaryValuesWriter.getBytes() 里在获得bytes时, 就是通过
-RunLengthBitPackingHybridEncoder 这么做的.
+除此之外 DictionaryValuesWriter.getBytes() 在获得bytes时, 还通过 RunLengthBitPackingHybridEncoder 对 encodedValues 进行
+进一步编码.
 
-而数据的真实值此时保存在 intDictionaryContent 中， 最后将 intDictionaryContent 保存到该列的 DictionaryPage 中
+最后将 intDictionaryContent 和 encodedValues 保存到该列的 DictionaryPage 中.
 
 ### repetitionColumn/definitionColumn
 
