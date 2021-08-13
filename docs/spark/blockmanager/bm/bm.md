@@ -33,12 +33,12 @@ sc.env.blockManager.putSingle(blockId, Bean(10), StorageLevel.MEMORY_ONLY_SER)
 sc.stop()
 ```
 
-注意: `putSingle`函数用于向 BM 中写入 JVM 对象, 而该对象一定是可以序列化的, 否则会报错.
+注意: `putSingle`函数用于向 BM 中写入 JVM 对象, **而该对象一定是可以序列化的**, 否则会报错.
 
 ## BlockManager OverView
 
 BlockManager 管理着 Driver/Executor 存储的所有 Block, 提供 replication 机制.
-内部提供多种存储介质(Memory/Off Heap/Disk)用于满足不同的存储需求.
+内部提供多种存储介质(Memory/Disk)用于满足不同的存储需求.
 
 BlockManager 中常用的数据结构如下
 
@@ -51,7 +51,7 @@ BlockManager 中常用的数据结构如下
 
 ### OverView
 
-下面这张流程图基本上可以表示依存一个JVM对象的整个过程,
+下面这张流程图描述存储一个JVM对象的整个过程,
 
 ![overview](/docs/spark/blockmanager/bm/blockmanager-putSingle.svg)
 
@@ -60,11 +60,12 @@ BlockManager 中常用的数据结构如下
 ### BlockManagerMasterEndpoint
 
 BlockManager 是 Per-JVM 进程的, 所有 executor 和 driver 都**有且只有一个** BlockManager. 当 Spark App launch 时,
-它首先向 Spark Cluster 注册 Application, 并申请创建 Executor, 进而创建并初始化 BlockManager. Spark 会为 Driver
-生成一个 SparkContext, 进而创建并初始化 Driver 端的 BlockManager. 如图中 1, 2 所示.
+它首先向 Spark Cluster 注册 Application, 并申请创建 Executor, 进而创建并初始化 BlockManager.
+
+在 Driver 端, Spark 会为 Driver 生成一个 SparkContext, 进而创建并初始化 Driver 端的 BlockManager. 如图中 1, 2 所示.
 
 Driver 端在生成 BlockManager 前会先向 RPC 注册名为`BlockManagerMaster.DRIVER_ENDPOINT_NAME` 的 BlockManagerMasterEndpoint,
-Executor在初始化 BlockManager 前会向 RPC 中查询 `BlockManagerMaster.DRIVER_ENDPOINT_NAME` 并获得
+Executor在初始化 BlockManager 前首先会向 RPC 中查询 `BlockManagerMaster.DRIVER_ENDPOINT_NAME` 并获得
 该 BlockManagerMasterEndpoint 的ref, 也就是远程代理, 这样 Executor 就可以通过该 EndPointRef 向 BlockManagerMasterEndpoint
 发送 RPC call了.
 
@@ -86,8 +87,8 @@ Executor在初始化 BlockManager 前会向 RPC 中查询 `BlockManagerMaster.DR
 
 - register
 
-不管是 Driver 还是 Executor, `BlockManager.initialize` 都会向 Driver 端的 BlockManagerMasterEndpoint 注册 BlockManager.
-BlockManagerMasterEndpoint 为注册的 BlockManager 生成一个 BlockManagerInfo, 该 BlockManagerInfo 保存了对应的 BlockManager
+不管是 Driver 还是 Executor, `BlockManager.initialize` 都会向 Driver 端的 BlockManagerMasterEndpoint 发送注册 BlockManager 的RPC call.
+BlockManagerMasterEndpoint 为注册的 BlockManager 生成一个 BlockManagerInfo, 该 BlockManagerInfo 保存了注册的 BlockManager
 的相关信息以及其 RPC ref.
 
 BlockManagerMasterEndpoint 提供的 RPC 除了 register, 还有
@@ -190,7 +191,7 @@ BlockManager 将 block 保存到 Memory 当中, Memory 进一步又可以分为 
 | classTag: ClassTag[T] | T 的 ClassTag, 用于获得序列器|
 | memoryMode: MemoryMode | 可以 ON HEAP或 OFF HEAP|
 
-Memory的两种模式又可以进一步细分为 Execution memory与 storage memory, 它们分用于不同的目的. execution memory 通常是指那些涉及到**计算操作**的 Memory, 
+Memory的两种模式又可以进一步细分为 Execution memory与 storage memory, 它们分用于不同的目的. execution memory 通常是指那些涉及到**计算操作**的 Memory,
 如 shuffles/joins/sorts/aggregations. 而 storage memory 通常指 caching 和跨集群的内部数据的传输的 memory.
 
 #### UnifiedMemoryManager
@@ -222,10 +223,10 @@ maxHeapMemory = (max_memory_of_JVM - 1.5*300M) * $(spark.memory.fraction)
 对于 executor 来说, 它值由 --executor-memory 或 spark.executor.memory 决定
 
 
-onHeapStorageRegionSize = maxMemory * $(spark.memory.storageFraction), 
+onHeapStorageRegionSize = maxMemory * $(spark.memory.storageFraction),
 其中spark.memory.storageFraction默认为 0.5
 
-onHeapStorageRegionSize 表示初始化的 on Heap Storage pool size, 
+onHeapStorageRegionSize 表示初始化的 on Heap Storage pool size,
 但它并非一直不变, 它可以向Execution memory 借入或借出 memory, 反之亦然.
 ```
 
@@ -239,6 +240,16 @@ onHeapStorageRegionSize 表示初始化的 on Heap Storage pool size,
 从 Storage mem中申请内存时, 如果 Storage mem中可用内存小于 Block 大小, 此时 Storage mem 需要向 Execution mem 借
 内存, 如果最后可用内存可以存储下 Block, 那直接 reserve 掉该内存. 如果最后的内存依然不足以存放下该 Block, 此时就需要
 从 LRU 缓存中 drop 掉老的 Block, 如果老的 Block是可以落盘, 则落盘, 否则直接从 memory 移出掉.
+
+#### 从 Execution memory 中申请内存
+
+![acquire-mem-from-execution](/docs/spark/blockmanager/bm/blockmanager-mm-acquireExecutionMem.svg)
+
+申请 Execution memory 和 申请 Storage memory 相似， 当 Execution memory 不足时, 会向 Storage pool 借内存.
+
+但是 Execution memory 和 Storage Memory 有个不同的是, Spark 会保证每个 Task 的最大和最小 memory. 当申请的
+Execution memory 不足时，可能会一直 Block 当前这个 Task, 直到其它 Task 释放掉 Execution Memory, 再重新计算
+是否可以申请到足够多的 memory 了.
 
 ### DiskStore
 
