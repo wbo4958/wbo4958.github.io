@@ -106,7 +106,9 @@ BlockManagerMasterEndpoint 提供的 RPC 除了 register, 还有
 BlockTransferService 是一个 C/S 架构, 目前只有一个实现 NettyBlockTransferService, 即底层使用 Netty 传输. BlockTransferService
 用于将 Block 数据上传到 Peer 端的 BlockManager, 也用于向 Peer 端的 BlockManager 获得 Block 数据.
 
-## 存储Block API
+## put/get Block API
+
+### 储存 Block APIs
 
 - putBytes 将序列化后的字节数组存储到BlockManager中
 - putBlockData 底层调用 putBytes
@@ -157,6 +159,26 @@ putSingle 功能很简单
 
 3. 然后向 BlockManagerMaster 上报 BlockStatus
 4. 最后根据 StorageLevel 中的 replication, 再将 Block 备份到其它非 driver的BlockManager 中.
+
+### 获取 Block APIs
+
+有 put Block API, 对应也就有 get Block 的 API
+
+- getLocalValues    从本地 BlockManager 获得 Block 的 JVM 对象
+- getLocalBytes     从本地 BlockManager 获得 Block 的 字节数组
+- getRemoteValues   从其它 BlockManager 获得 Block 的 JVM 对象
+- getRemoteBytes    从其它 BlockManager 获得 Block 的 字节数组
+- getSingle         从本地或其它 BlockManager 获得 Block 数据的 JVM 对象
+
+getSingle的流程图如下所示,
+
+![getSingle](/docs/spark/blockmanager/bm/blockmanager-getSingle.svg)
+
+1. 尝试从本地获取，然后根据 storage level 从 memory 或 disk 尝试获得数据
+2. 如果本地获取失败, 则从其它 BlockManager 获取
+   1. 首先尝试从相同的 Host 的 disk 中获取
+   2. 再次尝试从相同的 host 的 memory 中获取
+   3. 最后中尝试从其它 host 中获取
 
 ## BlockManager 的存储介质
 
@@ -221,7 +243,6 @@ maxHeapMemory = (max_memory_of_JVM - 1.5*300M) * $(spark.memory.fraction)
 而 max_memory_of_JVM:
 对于 driver 来说, 它值由 --driver-memory 或 spark.driver.memory 决定
 对于 executor 来说, 它值由 --executor-memory 或 spark.executor.memory 决定
-
 
 onHeapStorageRegionSize = maxMemory * $(spark.memory.storageFraction),
 其中spark.memory.storageFraction默认为 0.5
