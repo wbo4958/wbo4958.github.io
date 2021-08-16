@@ -155,7 +155,8 @@ putSingle 功能很简单
 1. 为待保存的 Block 数据生成一个 BlockInfo,
 2. 接着根据 Block 的 StorageLevel 将 Block 保存到对应的 Memory/Disk 中并获得 BlockStatus.
 
-   如果 Block Storage Level 为 onMem 和 onDisk, 那也会先尝试将该 Block 先保存到 Memory 当中, 如果 Memory 没有足够内存，此时才将 Block 保存到磁盘中.
+   1. 如果 Block Storage Level 为 onMem 和 onDisk, 那也会先尝试将该 Block 先保存到 Memory 当中, 如果 Memory 没有足够内存，此时才将 Block 保存到磁盘中.
+   2. putSingle 调用 putIterator, 注意: putIterator 会将整个 iterator 的数据取出来保存.
 
 3. 然后向 BlockManagerMaster 上报 BlockStatus
 4. 最后根据 StorageLevel 中的 replication, 再将 Block 备份到其它非 driver的BlockManager 中.
