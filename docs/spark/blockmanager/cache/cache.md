@@ -6,7 +6,7 @@ parent: BlockManager
 grand_parent: Spark
 ---
 
-# RDD/Dataset cache 
+# RDD cache
 {: .no_toc}
 
 本文通过代码学习 RDD cache的工作机制. 本文基于 Spark 3.1.1.
@@ -17,9 +17,7 @@ grand_parent: Spark
 1. TOC
 {:toc}
 
-## RDD cache
-
-### 示例代码
+## 示例代码
 
 ``` scala
 val conf = new SparkConf()
@@ -64,7 +62,7 @@ rdd3触发了两次 `collect`,
 
 从这两次计算结果可以看出, RDD 缓存是将 rdd计算结果缓存到 BlockManager 中, 当后面有对该RDD操作的, 直接返回缓存结果.
 
-### RDD cache 原理
+## RDD cache 原理
 
 ![](/docs/spark/blockmanager/cache/rdd-cache-rdd-iterator.svg)
 
