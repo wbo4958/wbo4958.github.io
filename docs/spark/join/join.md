@@ -49,4 +49,54 @@ BroadcastHashJoinExec 术语
 
   streamPlan 是 Join 实现时，依次匹配的表.
 
+``` console
+inner join
++------+---------+---------+------+
+|std_id|dept_name|dept_name|std_id|
++------+---------+---------+------+
+|     2|     math|     math|     7|
+|     2|     math|     math|     1|
+|     4|     math|     math|     7|
+|     4|     math|     math|     1|
++------+---------+---------+------+
 
+leftouter join
++------+---------+---------+------+
+|std_id|dept_name|dept_name|std_id|
++------+---------+---------+------+
+|     3|  history|     null|  null|
+|     2|     math|     math|     7|
+|     2|     math|     math|     1|
+|     5|  history|     null|  null|
+|     4|     math|     math|     7|
+|     4|     math|     math|     1|
++------+---------+---------+------+
+
+leftsemi join
++------+---------+
+|std_id|dept_name|
++------+---------+
+|     2|     math|
+|     4|     math|
++------+---------+
+
+leftanti join
++------+---------+
+|std_id|dept_name|
++------+---------+
+|     3|  history|
+|     5|  history|
++------+---------+
+
+rightouter join
++------+---------+---------+------+
+|std_id|dept_name|dept_name|std_id|
++------+---------+---------+------+
+|  null|     null|    piano|     3|
+|     4|     math|     math|     1|
+|     2|     math|     math|     1|
+|  null|     null|   guitar|     3|
+|     4|     math|     math|     7|
+|     2|     math|     math|     7|
++------+---------+---------+------+
+```
