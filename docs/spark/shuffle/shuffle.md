@@ -26,15 +26,15 @@ df1.show()
 
 ![shuffle](/docs/spark/shuffle/shuffle-shuffle.svg)
 
-DAG 划分 Stages 的条件是 ShuffleDependency. 将 ShuffeleDependency 自带的 rdd chain 划分为 ShuffleStage.
+DAG 划分 Stages 的判断条件是 ShuffleDependency. 将 ShuffeleDependency 自带的 rdd chain 划分为 ShuffleStage.
 
 Shuffle整个过程分为 Shuffle write 和 Shuffle read 过程, 分别在不同的 Stage 里完成.
 
-那 Spark 是如何将 Shuffle write 和 Shuffle read 关联起来呢? 答案是 ShuffleDependency, ShuffleDependency 是一个 Serializeable 的类, 它的对象会同时存在于 Shuffle write 和 Shuffle read 中.
+那 Spark 是如何将 Shuffle write 和 Shuffle read 关联起来呢? 答案是 ShuffleDependency, ShuffleDependency 是一个 Serializeable 的类, 由 driver 端生成一个对应的实例, 该实例会同时存在于 Shuffle write 和 Shuffle read 中.
 
-对于 ShuffleWrite, ShuffleMapTask 首先反序列化获得 ShuffleDependency. 然后调用 `ShuffleDependency.shuffleWriterProcessor.write()` 将rdd的计算结果进行 shuffle.
+对于 ShuffleWrite, ShuffleMapTask 首先反序列化获得 ShuffleDependency. 然后调用 `ShuffleDependency.shuffleWriterProcessor.write(rdd, dep, ...)` 将rdd的计算结果进行 shuffle.
 
-对于 ShuffleRead, ShuffledRowRDD借助于 ShuffleDependency 进行 shuffle read.
+对于 ShuffleRead, ShuffledRowRDD 借助于 ShuffleDependency 进行 shuffle read.
 
 ShuffleDependency 类中保存了很多在 shuffle write/read 过程中需要用到的一些变量, 如
 
@@ -50,7 +50,7 @@ ShuffleDependency 类中保存了很多在 shuffle write/read 过程中需要用
 
 对于 Spark SQL, ShuffleExchangeExec 是一个 Shuffle 的 operator.
 
-在 shuffle write 之前, ShuffleExchangeExec 会添加别的 MapPartitionsRDD, 比如为 repartition 添加 sort.
+在 shuffle write 之前, ShuffleExchangeExec 内部可能会添加 MapPartitionsRDD - 比如为 repartition 添加 sort.
 
 ![shuffle-write-rdd](/docs/spark/shuffle/shuffle-rdd-write.svg)
 
@@ -60,7 +60,7 @@ Shuffle write 按照 partitioning 将数据进行分区.
 
 并且在最后会添加一个 MapPartitionsRDD 根据 Partitioning 将数据变成 `Iterator(partitionId, internalRow)` 格式.
 
-根据 ShuffleHandle的不同, ShuffleWriter 不同, 即如何实现对数据 shuffle 不同, 可以分为下面三种.
+根据 ShuffleHandle 的不同, ShuffleWriter 不同, 对数据 shuffle的方式不同, 可以分为下面三种.
 
 - UnsafeShuffleWriter
 
@@ -83,6 +83,14 @@ Shuffle write 按照 partitioning 将数据进行分区.
 
 尽管分为3种不同的 ShuffleWriter, 但最终都会生成两种文件, 一个 shuffle.data 保存真正的 (key, value) 数据, 另一个是 shuffle.index 保存 partition 的偏移. 只不过可能这3种的 performance 会不同, 默认的 BypassMergeSortShuffleWriter 可能会优于其它两种, 因为它没有 sort 的过程.
 
+那如何选择 shuffle writer 呢?
+
+1. 如果 Reducer partition number <= `spark.shuffle.sort.bypassMergeThreshold`(200) 时选择 **BypassMergeSortShuffleWriter**. 如果 partition 数太多, 对于 BypassMergeSortShuffleWriter 方式来说， 每个 task 会产生太多的临时文件，导致 performance 可以下降.
+
+2. Serializer 要支持 `supportsRelocationOfSerializedObjects` UnsafeRowSerializer 默认是支持的. 且 `Reducer partition number <= 16777215`, 选择 **UnsafeShuffleWriter**
+
+3. 1,2 条件不满足，则选择 **SortShuffleWriter**
+
 ## shuffle read
 
-Shuffle write已经将数据 partition 好了, Shuffle read基本上就是反过程, 将对应的 partition 读取出来就行了. 首先 ShuffleBlockFetcherIterator 读取相关的数据到 InputStream, 然后再将数据转换为 (key, value), 后面再根据是否需要 agg/sort, 再对从不同 map task 里读取的数据进行 agg/sort ...
+Shuffle write已经将数据 partition 好了, Shuffle read基本上就是反过程, 将对应的 partition 从文件中读取出来就行了, 先从 Driver 端获得 shuffle 数据在哪个 BlockManager, 然后从该 BlockManager 找到 shuffle.index 文件找到 partition 的偏移，再从 shuffle.data 数据中读取出来. 首先 ShuffleBlockFetcherIterator 读取相关的数据到 InputStream, 然后再将数据转换为 (key, value), 后面再根据是否需要 agg/sort, 再对从不同 map task 里读取的数据进行 agg/sort ...
