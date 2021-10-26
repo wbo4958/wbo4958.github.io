@@ -25,7 +25,7 @@ final class GeneratedIteratorForCodegenStage1 extends org.apache.spark.sql.execu
   }
 
   private void sort_addToSorter_0() throws java.io.IOException {
-    while ( inputadapter_input_0.hasNext()) { //对输入数据进行排序
+    while ( inputadapter_input_0.hasNext()) { //依次遍历所有的输入数据，然后对输入数据进行排序
       InternalRow inputadapter_row_0 = (InternalRow) inputadapter_input_0.next();
 
       sort_sorter_0.insertRow((UnsafeRow)inputadapter_row_0); //采用 UnsafeExternalRowSoter 对输入数据进行排序
@@ -142,6 +142,8 @@ final class GeneratedIteratorForCodegenStage3 extends org.apache.spark.sql.execu
 
   }
 
+
+  // inner join 的实现
   private boolean smj_findNextJoinRows_0(
     scala.collection.Iterator streamedIter,
     scala.collection.Iterator bufferedIter) {
@@ -152,13 +154,13 @@ final class GeneratedIteratorForCodegenStage3 extends org.apache.spark.sql.execu
       smj_streamedRow_0 = (InternalRow) streamedIter.next();
       boolean smj_isNull_0 = smj_streamedRow_0.isNullAt(1); // streamPlan 的 join key 是否为null
       UTF8String smj_value_0 = smj_isNull_0 ?  null : (smj_streamedRow_0.getUTF8String(1));
-      if (smj_isNull_0) { // streamPlan 的 join key 为 null，直接 pass
+      if (smj_isNull_0) { // streamPlan 的 join key 为 null，直接 pass, 找下一条非 null 的row
         smj_streamedRow_0 = null;
         continue;
 
       }
 
-      // smj_matches_0 保存的是 buildPlan 中所有和 streamPlan 当前行相等的 join key 的所有的行
+      // smj_matches_0 保存的是 buildPlan 中所有和 streamPlan 当前行 smj_streamedRow_0 相等的 join key 的所有的行
       if (!smj_matches_0.isEmpty()) {
         comp = 0;
         if (comp == 0) {
@@ -166,21 +168,21 @@ final class GeneratedIteratorForCodegenStage3 extends org.apache.spark.sql.execu
           comp = smj_value_0.compare(smj_mutableStateArray_0[1]); // smj_mutableStateArray_0 表示当前 buildPlan的行
         }
 
-        if (comp == 0) {
+        if (comp == 0) { //当前 steamPlan 与上一次已经找到的row join key 相同，也就是 streamPlan 连续两个相同的 join key 的行，第二行直接 match
           return true;
         }
         smj_matches_0.clear();
       }
 
-      do {
+      do { //开始在 buildPlan 中查找相同的行
         if (smj_bufferedRow_0 == null) {
           if (!bufferedIter.hasNext()) { // 是否 buildPlan 没有数据了
-            smj_mutableStateArray_0[1] = smj_value_0.clone();
+            smj_mutableStateArray_0[1] = smj_value_0.clone(); 
             return !smj_matches_0.isEmpty();
           }
           smj_bufferedRow_0 = (InternalRow) bufferedIter.next(); //获得 buildPlan的行
           boolean smj_isNull_1 = smj_bufferedRow_0.isNullAt(0);
-          UTF8String smj_value_1 = smj_isNull_1 ?  null : (smj_bufferedRow_0.getUTF8String(0));
+          UTF8String smj_value_1 = smj_isNull_1 ?  null : (smj_bufferedRow_0.getUTF8String(0)); // buildPlan行的 join key 是否为null
           if (smj_isNull_1) { // 取出的 buildPlan 的行的数据为null
             smj_bufferedRow_0 = null;
             continue;
@@ -196,15 +198,15 @@ final class GeneratedIteratorForCodegenStage3 extends org.apache.spark.sql.execu
         if (comp > 0) {
           // streamPlan 超前了
           smj_bufferedRow_0 = null;
-        } else if (comp < 0) {
-          if (!smj_matches_0.isEmpty()) {
+        } else if (comp < 0) { // streamPlan 落后了
+          if (!smj_matches_0.isEmpty()) { 
             smj_mutableStateArray_0[1] = smj_value_0.clone();
             return true;
           } else {
             smj_streamedRow_0 = null;
           }
         } else {
-          // match 了
+          // match 了, 继续查找后面的 buildPlan row, 将相同的 join key 的行依次加入到 matches中
           smj_matches_0.add((UnsafeRow) smj_bufferedRow_0);
           smj_bufferedRow_0 = null;
         }
@@ -220,12 +222,12 @@ final class GeneratedIteratorForCodegenStage3 extends org.apache.spark.sql.execu
       boolean smj_isNull_2 = false;
       UTF8String smj_value_3 = null;
 
-      smj_value_2 = smj_streamedRow_0.getInt(0);
+      smj_value_2 = smj_streamedRow_0.getInt(0); // 当前streamPlan的行
       smj_isNull_2 = smj_streamedRow_0.isNullAt(1);
       smj_value_3 = smj_isNull_2 ? null : (smj_streamedRow_0.getUTF8String(1));
-      scala.collection.Iterator<UnsafeRow> smj_iterator_0 = smj_matches_0.generateIterator();
+      scala.collection.Iterator<UnsafeRow> smj_iterator_0 = smj_matches_0.generateIterator(); //所有match的行
 
-      while (smj_iterator_0.hasNext()) {
+      while (smj_iterator_0.hasNext()) { //依次遍历所有 match 的行, 也就是所有buildPlan join key 相同的行,进行 append
         InternalRow smj_bufferedRow_1 = (InternalRow) smj_iterator_0.next();
 
         ((org.apache.spark.sql.execution.metric.SQLMetric) references[0] /* numOutputRows */).add(1);
