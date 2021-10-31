@@ -162,7 +162,7 @@ BroadcastHashJoinExec 中 requiredChildDistribution 定义如下,
 
 因为 SMJ 要求 left/right 排序好了，且 left/right 具有相同的数据分布，因此同一个 reducer task 都会获得具有相同的 join key 的 left/right 数据. 考虑到 left/right 是排序好的，因此做 只需要同时往下移动 left/right 的指针 (指向不同的行), 进行比较, 就可以很简单的实现不同的 join 类型. 如上图所示.
 
-### ShuffleHashJoin
+### ShuffledHashJoinExec
 
 ``` console
 == Physical Plan ==
@@ -172,3 +172,15 @@ BroadcastHashJoinExec 中 requiredChildDistribution 定义如下,
 +- Exchange hashpartitioning(dept_name#18, 200), ENSURE_REQUIREMENTS, [id=#13]
    +- LocalTableScan [dept_name#18, std_id#19]
 ```
+
+![shj](/docs/spark/join/join-shj.svg)
+
+ShuffledHashJoinExec 与 SortMergeJoinExec 都继承同一个 ShuffledJoin, 即它们有相同的 requiredChildDistribution 定义， 也就是当 children 的数据分布不符合要求时，此时需要插入 ShuffleExchangeExec.
+
+但 requiredChildOrdering 不要求 children 排序. 所以不需要插入 SortExec.
+
+``` scala
+def requiredChildOrdering: Seq[Seq[SortOrder]] = Seq.fill(children.size)(Nil)
+```
+
+ShuffledHashJoinExec 首先将 buildPlan 建立 HashRelation, 然后依次遍历 steaming Plan, 从 streaming row 中取出 join key, 再去 buildPlan 的 HashRelation 查找是否 match 来进行不同的 join 操作. 如上图所示.
