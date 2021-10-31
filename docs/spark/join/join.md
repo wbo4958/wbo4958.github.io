@@ -184,3 +184,16 @@ def requiredChildOrdering: Seq[Seq[SortOrder]] = Seq.fill(children.size)(Nil)
 ```
 
 ShuffledHashJoinExec 首先将 buildPlan 建立 HashRelation, 然后依次遍历 steaming Plan, 从 streaming row 中取出 join key, 再去 buildPlan 的 HashRelation 查找是否 match 来进行不同的 join 操作. 如上图所示.
+
+### CartesianProductExec
+
+``` console
+== Physical Plan ==
+CartesianProduct (dept_name#8 = dept_name#18)
+:- LocalTableScan [std_id#7, dept_name#8]
++- LocalTableScan [dept_name#18, std_id#19]
+```
+
+迪卡尔乘积不会引入任何的 shuffle 和 sort, 它支持 equal join 和 非 equal join. 它将 left child 和 right child 进行迪卡尔乘积， 然后通过 join condition 进行 eval, 最后再将得到的结果再进行合并到一个 buffer byte数组 中. 整个过程如下所示,
+
+![cartesian product](/docs/spark/join/join-CartesianProduct.svg)
