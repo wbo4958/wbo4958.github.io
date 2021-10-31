@@ -8,7 +8,7 @@ parent: Spark
 # Spark Join
 {: .no_toc}
 
-本文通过代码学习 Spark 中 Join 的实现. 本文基于 Spark 3.2.0
+本文通过代码学习 Spark 中 Join 的实现. 本文基于 Spark 3.2.1-SNAPSHOT
 
 ## 目录
 {: .no_toc .text-delta}
@@ -70,7 +70,7 @@ rightouter join
 +------+---------+---------+------+
 ```
 
-## xxx
+## Join LogicalPlan
 
 | Join | |
 | ---- | --- |
@@ -132,3 +132,43 @@ BroadcastHashJoinExec 中 requiredChildDistribution 定义如下,
 
 ### SortMergeJoinExec
 
+![smj exec](/docs/spark/join/join-smj-exec.svg)
+
+``` scala
+  override def requiredChildDistribution: Seq[Distribution] = {
+    if (isSkewJoin) { // skew join, 默认是 false.
+      // We re-arrange the shuffle partitions to deal with skew join, and the new children
+      // partitioning doesn't satisfy `HashClusteredDistribution`.
+      UnspecifiedDistribution :: UnspecifiedDistribution :: Nil
+    } else {
+      HashClusteredDistribution(leftKeys) :: HashClusteredDistribution(rightKeys) :: Nil
+    }
+  }
+```
+
+由SortMergeJoinExec 所定义的 requiredChildDistribution 可知, SortMergeJoinExec 要求 left 和 right child 同时具有 HashCluster 分布. 即如果 child 的数据分布不满足需求. Spark EnsureRequirements 会在 SortMergeJoinExec 与 child 之间插入一个 ShuffleExchangeExec.
+
+``` scala
+  override def requiredChildOrdering: Seq[Seq[SortOrder]] =
+    requiredOrders(leftKeys) :: requiredOrders(rightKeys) :: Nil
+
+  private def requiredOrders(keys: Seq[Expression]): Seq[SortOrder] = {
+    // This must be ascending in order to agree with the `keyOrdering` defined in `doExecute()`.
+    keys.map(SortOrder(_, Ascending))
+  }
+```
+
+同理要求 child 的数据是按 join key 排序好的, 如果不满足， EnsureRequirements 会在 SortMergeJoinExec 与 child 之间插入一个 SortExec.
+
+因为 SMJ 要求 left/right 排序好了，且 left/right 具有相同的数据分布，因此同一个 reducer task 都会获得具有相同的 join key 的 left/right 数据. 考虑到 left/right 是排序好的，因此做 只需要同时往下移动 left/right 的指针 (指向不同的行), 进行比较, 就可以很简单的实现不同的 join 类型. 如上图所示.
+
+### ShuffleHashJoin
+
+``` console
+== Physical Plan ==
+*(1) ShuffledHashJoin [dept_name#8], [dept_name#18], Inner, BuildRight
+:- Exchange hashpartitioning(dept_name#8, 200), ENSURE_REQUIREMENTS, [id=#12]
+:  +- LocalTableScan [std_id#7, dept_name#8]
++- Exchange hashpartitioning(dept_name#18, 200), ENSURE_REQUIREMENTS, [id=#13]
+   +- LocalTableScan [dept_name#18, std_id#19]
+```
