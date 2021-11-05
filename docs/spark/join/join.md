@@ -8,7 +8,7 @@ parent: Spark
 # Spark Join
 {: .no_toc}
 
-本文通过代码学习 Spark 中 Join 的实现. 本文基于 Spark 3.2.1-SNAPSHOT
+本文通过代码学习 Spark 中 Join 的几种不同的实现. 本文基于 Spark 3.2.1-SNAPSHOT
 
 ## 目录
 {: .no_toc .text-delta}
@@ -17,6 +17,29 @@ parent: Spark
 {:toc}
 
 ## 测试代码
+
+``` scala
+import spark.sqlContext.implicits._
+
+val leftDf = Seq (
+  (3, "history"),
+  (2, "math"),
+  (5, "history"),
+  (4, "math")).toDF("std_id", "dept_name")
+
+val rightDf = Seq (
+  ("piano", 3),
+  ("math", 1),
+  ("guitar", 3),
+  ("math", 7)).toDF("dept_name", "std_id")
+
+// 改变 hint 可以切换到不同的实现, 如 broadcast/merge/shuffle_hash/shuffle_replicate_nl
+val df = leftDf.join(rightDf.hint("broadcast"), leftDf("std_id").equalT(rightDf("std_id")), "inner")
+df.explain(true)
+df.show()
+```
+
+输出结果:
 
 ``` console
 inner join
@@ -80,6 +103,8 @@ rightouter join
 | condition: Option[Expression] | Join条件|
 | hint: JoinHint | Join hint |
 
+Join LogicalPlan 包含上述几个内容， 参与 join 的 plan, join条件是什么, join类型以及 join Hint.
+
 ## Join
 
 Join 是一个算子， Spark对 Join 算子有多种实现, 如 BHJ/SMJ/SHJ ... 这些实现最后生成的 Join 结果是一致的, 但是不同的实现应用的场景或许不一样，自然不同的实现带来的 performance 也不一样.
@@ -90,7 +115,7 @@ Join 是一个算子， Spark对 Join 算子有多种实现, 如 BHJ/SMJ/SHJ ...
 
 ![join plan condition](/docs/spark/join/join-plan-condition.svg)
 
-### BroadcastHashJoinExec
+Join 中几个比较常见的术语
 
 - BuildSide
 
@@ -103,6 +128,16 @@ Join 是一个算子， Spark对 Join 算子有多种实现, 如 BHJ/SMJ/SHJ ...
 - streamPlan
 
   BroadcastHashJoinExec 进行 join 时，依次遍历 streamPlan 的行，然后在 buildPlan 中通过 joinKey 的 hash 值找到 match 时行 join.
+
+### BroadcastHashJoinExec
+
+``` console
+== Physical Plan ==
+*(1) BroadcastHashJoin [std_id#7], [std_id#19], Inner, BuildRight, false
+:- *(1) LocalTableScan [std_id#7, dept_name#8]
++- BroadcastExchange HashedRelationBroadcastMode(List(cast(input[1, int, false] as bigint)),false), [id=#11]
+   +- LocalTableScan [dept_name#18, std_id#19]
+```
 
 ![bhj](/docs/spark/join/join-bhj-execute.svg)
 
@@ -131,6 +166,17 @@ BroadcastHashJoinExec 中 requiredChildDistribution 定义如下,
 可以看出 BroadcastHashJoinExec 自己不会引入任何的 shuffle. 但是考虑到广播需要将 relation 从 driver 端发送到 executor 端，那 relation 不能太大，否则会引起 performance issue. Spark 默认是广播 10M (可由 spark.sql.autoBroadcastJoinThreshold 配置) 以下的小表. 大于 10M 的话, spark 将不会采用 BroadcastHashJoinExec 来实现 Join了.
 
 ### SortMergeJoinExec
+
+``` console
+== Physical Plan ==
+*(3) SortMergeJoin [std_id#7], [std_id#19], Inner
+:- *(1) Sort [std_id#7 ASC NULLS FIRST], false, 0
+:  +- Exchange hashpartitioning(std_id#7, 200), ENSURE_REQUIREMENTS, [id=#12]
+:     +- LocalTableScan [std_id#7, dept_name#8]
++- *(2) Sort [std_id#19 ASC NULLS FIRST], false, 0
+   +- Exchange hashpartitioning(std_id#19, 200), ENSURE_REQUIREMENTS, [id=#13]
+      +- LocalTableScan [dept_name#18, std_id#19]
+```
 
 ![smj exec](/docs/spark/join/join-smj-exec.svg)
 
@@ -197,3 +243,23 @@ CartesianProduct (dept_name#8 = dept_name#18)
 迪卡尔乘积不会引入任何的 shuffle 和 sort, 它支持 equal join 和 非 equal join. 它将 left child 和 right child 进行迪卡尔乘积， 然后通过 join condition 进行 eval, 最后再将得到的结果再进行合并到一个 buffer byte数组 中. 整个过程如下所示,
 
 ![cartesian product](/docs/spark/join/join-CartesianProduct.svg)
+
+### BroadcastNestedLoopJoinExec
+
+``` console
+== Physical Plan ==
+*(1) BroadcastNestedLoopJoin BuildRight, Inner, (std_id#7 > std_id#19)
+:- *(1) LocalTableScan [std_id#7, dept_name#8]
++- BroadcastExchange IdentityBroadcastMode, [id=#11]
+   +- LocalTableScan [dept_name#18, std_id#19]
+```
+
+![BroadcastNestedLoopJoinExec](/docs/spark/join/join-BroadcastNestedLoopJoin.svg)
+
+BroadcastNestedLoopJoinExec 可以用于 EqualJoin 和 Non-EqualJoin 两种.
+
+BroadcastNestedLoopJoinExec 也是以广播方式实现的 join, 它没有大小的限制，哪怕小表有几十个G，它依然会先将小表 collect 回 driver 端， 然后再广播出去. BroadcastNestedLoopJoinExec 与 BroadcastHashJoinExec 有点不同的是 BroadcastExchangeExec会将 collect 回来的数据建立 HashRelation, 而 BroadcastNestedLoopJoinExec不需要.
+
+虽然 BroadcastNestedLoopJoinExec 没有引入 shuffle, 但是当小表很大时， 非常容易 OOM.
+
+执行 Join 时, 对于每一个 stream plan row, 它会依次遍历 build plan 的所有 row, 判断 join 条件是否满足，如果满足，则 join. 可以看出 BroadcastNestedLoopJoinExec 执行 join 的时间复杂度是 O(n*n).
