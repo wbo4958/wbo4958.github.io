@@ -97,17 +97,17 @@ rightouter join
 
 | Join | |
 | ---- | --- |
-| left: LogicalPlan | |
-| right: LogicalPlan | |
+| left: LogicalPlan | 参与 Join 的 left LogicalPlan |
+| right: LogicalPlan | 参与 Join 的 right LogicalPlan |
 | joinType | InnerLike(Cross/Inner) / LeftSemi / RightOuter / NaturalJoin /LeftOuter / FullOuter / LeftAnti |
 | condition: Option[Expression] | Join条件|
 | hint: JoinHint | Join hint |
 
-Join LogicalPlan 包含上述几个内容， 参与 join 的 plan, join条件是什么, join类型以及 join Hint.
+Join LogicalPlan 包含上述几个内容， 参与 join 的 plans, join条件是什么, join类型以及 join Hint.
 
 ## Join
 
-Join 是一个算子， Spark对 Join 算子有多种实现, 如 BHJ/SMJ/SHJ ... 这些实现最后生成的 Join 结果是一致的, 但是不同的实现应用的场景或许不一样，自然不同的实现带来的 performance 也不一样.
+Join 是一个算子， Spark对 Join 算子有多种实现, 如 BHJ/SMJ/SHJ ... 这些实现最后生成的 Join 结果是一致的, 但是不同的实现应用的场景或许不一样，因此不同的实现带来的 performance 也不一样.
 
 ![join plan](/docs/spark/join/join-plan-join.svg)
 
@@ -206,7 +206,7 @@ BroadcastHashJoinExec 中 requiredChildDistribution 定义如下,
 
 同理要求 child 的数据是按 join key 排序好的, 如果不满足， EnsureRequirements 会在 SortMergeJoinExec 与 child 之间插入一个 SortExec.
 
-因为 SMJ 要求 left/right 排序好了，且 left/right 具有相同的数据分布，因此同一个 reducer task 都会获得具有相同的 join key 的 left/right 数据. 考虑到 left/right 是排序好的，因此做 只需要同时往下移动 left/right 的指针 (指向不同的行), 进行比较, 就可以很简单的实现不同的 join 类型. 如上图所示.
+因为 SMJ 要求 left/right 排序好了，且 left/right 具有相同的数据分布，因此同一个 reducer task 都会获得具有相同的 join key 的 left/right 数据. 考虑到 left/right 是排序好的，因此只需要同时往下移动 left/right 的指针 (指向不同的行) 进行比较, 就可以很简单的实现不同的 join 类型. 如上图所示.
 
 ### ShuffledHashJoinExec
 
@@ -229,7 +229,9 @@ ShuffledHashJoinExec 与 SortMergeJoinExec 都继承同一个 ShuffledJoin, 即�
 def requiredChildOrdering: Seq[Seq[SortOrder]] = Seq.fill(children.size)(Nil)
 ```
 
-ShuffledHashJoinExec 首先将 buildPlan 建立 HashRelation, 然后依次遍历 steaming Plan, 从 streaming row 中取出 join key, 再去 buildPlan 的 HashRelation 查找是否 match 来进行不同的 join 操作. 如上图所示.
+ShuffledHashJoin 在每个 Task 中会先将 buildPlan 建立起 HashRelation, 然后依次遍历 steaming Plan, 从 streaming row 中取出 join key, 再从 buildPlan 的 HashRelation 查找是否 match 来进行不同的 join 操作. 如上图所示.
+
+由于 SHJ 需要在每个 Task 中对 buildPlan build HashRelation, 因此 SHJ 需要很大的内存，否则会 spill 到磁盘，引起 performance 问题
 
 ### CartesianProductExec
 
@@ -263,3 +265,40 @@ BroadcastNestedLoopJoinExec 也是以广播方式实现的 join, 它没有大小
 虽然 BroadcastNestedLoopJoinExec 没有引入 shuffle, 但是当小表很大时， 非常容易 OOM.
 
 执行 Join 时, 对于每一个 stream plan row, 它会依次遍历 build plan 的所有 row, 判断 join 条件是否满足，如果满足，则 join. 可以看出 BroadcastNestedLoopJoinExec 执行 join 的时间复杂度是 O(n*n).
+
+## Spark 如何 pick join 的实现
+
+在理解了每种 Join 实现后，现在可以看看 Spark 如何挑选 Join 实现的
+
+``` console
+对于 Equal join, 首先查看 Join Hint.
+If it is an equi-join, we first look at the join hints w.r.t. the following order:
+  1. broadcast hint: pick broadcast hash join if the join type is supported. If both sides
+     have the broadcast hints, choose the smaller side (based on stats) to broadcast.
+  2. sort merge hint: pick sort merge join if join keys are sortable.
+  3. shuffle hash hint: We pick shuffle hash join if the join type is supported. If both
+     sides have the shuffle hash hints, choose the smaller side (based on stats) as the
+     build side.
+  4. shuffle replicate NL hint: pick cartesian product if join type is inner like.
+
+If there is no hint or the hints are not applicable, we follow these rules one by one:
+  1. Pick broadcast hash join if one side is small enough to broadcast, and the join type
+     is supported. If both sides are small, choose the smaller side (based on stats)
+     to broadcast.
+  2. Pick shuffle hash join if one side is small enough to build local hash map, and is
+     much smaller than the other side, and `spark.sql.join.preferSortMergeJoin` is false.
+  3. Pick sort merge join if the join keys are sortable.
+  4. Pick cartesian product if join type is inner like.
+  5. Pick broadcast nested loop join as the final solution. It may OOM but we don't have
+     other choice.
+```
+
+对于没有 Join Hint 的情况，首先看下能否广播, 广播不需要进行 shuffle, performance 最好.
+其次再看下能否使用 ShuffleHashJoin, ShuffleHashJoin 相比于 SortMergeJoin 不需要对数据时行排序.
+但是 SHJ 需要有一张表足够小，这样在 build relation 时不引起 spill, performance 会比较好;
+但是一旦 spill, 那 performance 将会不理想.
+接着就是看能否用 SMJ, 最后才会考虑 CartesianProductExec 和 BroadcastNestedLoopJoinExec.
+
+## Bucket Join
+
+TODO
