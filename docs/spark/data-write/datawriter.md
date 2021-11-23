@@ -107,3 +107,5 @@ df.write.mode(SaveMode.Overwrite)
 ```
 
 CreateDataSourceTableAsSelectCommand 会生成 InsertIntoHadoopFsRelationCommand, 然后通过 InsertIntoHadoopFsRelationCommand.run 来进行 data write.
+
+![](/docs/spark/data-write/bucket-file-format.png)
