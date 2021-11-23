@@ -13,6 +13,9 @@ parent: Spark
 ## 目录
 {: .no_toc .text-delta}
 
+1. TOC
+{:toc}
+
 ## Spark DataWritingCommand
 
 Spark catalyst 有一类特别的 non-query LogicalPlan - Command, 对应于 DDL (Data Definition Language) 如 `CREATE DATABASE xxx` 以及 DML (Data Manipulation Language) 如 `INSERT INTO` 操作. Spark query plan 是 lazy 执行的， 而 Command 是非 lazy, 是 "eagerly" 执行的.
