@@ -1,7 +1,7 @@
 ---
 layout: page
 title: Encoder
-nav_order: 10
+nav_order: 700 
 parent: Spark 
 ---
 
