@@ -35,7 +35,7 @@ Specifically, to run on a cluster, the SparkContext can connect to several types
 
 Spark 的 Deploy 过程如图所示
 
-![](/docs/spark/spark-core/deploy/standalone-deploy-standalone-deploy.drawio.svg)
+![standalone-deploy](/docs/spark/spark-core/deploy/standalone-deploy.drawio.svg)
 
 ## Deploy涉及到的的组件
 
@@ -309,3 +309,74 @@ spreadOut=false的情况，先将一个worker分配完再去check另一个worker
 
 在这种情况下，只有一个exeuctor, 只要 `memoryPerExecutor <= Total executor memeory` 即可.
 同理可以推得其它种case, 可以参考 Master　的测试类.
+
+## 相关类
+
+### ApplicationDescription
+  
+  ApplicationDescription 描述详细的Application信息
+
+| ApplicationDescription                           |  意义                                              | 默认值                   |
+|--------------------------------------------------|----------------------------------------------------|---------------------------|
+| String name                                      | App name, 由 `spark.app.name` 指定                   | SimpApp                   |
+| Int maxCores                                     | 最大的request的 cpu cores, 由 `spark.cores.max` 指定  | None                      |
+| Int memoryPerExecutorMB                          | 每个executor进程需要的多少memory，单位是M `spark.executor.memory` 指定   | 1g                      |
+| Command command                                  | Worker 启动 Executor 的 Command 信息                              |                       |
+| String appUiUrl                                  | Application的UI url                                | http://192.168.xx.xx:4040 |
+| Seq[ResourceRequirement] resourceReqsPerExecutor | worker的rpc远程代理, 通过它可以与worker进行rpc通信      |                           |
+| Option[Int] coresPerExecutor                     | 每个executor所要使用的cpu cores  `spark.executor.cores`     | None,　默认是全部 cpu core  |
+| Option[Int] initialExecutorLimit                 | 该Application需要启动的executor上限                |       None                  |
+
+- Command
+
+Command 用来描述　Worker 怎么启动一个 JVM executor 进程
+
+| Command           |  变量意义               | dem value  |
+| --- | --- | --- |
+| String mainClass     | executor需要启动的mainClass  | CoarseGrainedExecutorBackend  |
+| Seq[String] arguments     | mainClass的参数  | --driver-url spark://CoarseGrainedExecutorBackend@192.xxx  --executor-id {{EXECUTOR_ID}}  --hostname xxx --cores xxx  --app-id xxx  --worker-url xxxx  |
+| Map[String, String] enviroment | executor需要的环境变量  | 如executor memory/spark user/spark.executorEnv.开头的信息 |
+| Seq[String] classPathEntries   | executor class path          | 由spark.executor.extraClassPath指定     |
+| Seq[String] libraryPathEntries | executor native library path | 由spark.executor.extraLibraryPath指定  |
+| Seq[String] javaOpts           | executor jvm选项             | 由spark.executor.extraJavaOptions指定 sparkJavaOpts  |
+
+### ApplicationInfo
+
+ApplicationInfo表示driver端提交的Application信息
+
+| ApplicationInfo            |  意义                                       | 默认 value               |
+|----------------------------|---------------------------------------------|--------------------------|
+| Long startTime             | App启动时间                                 |                          |
+| String id                  | App id                                      | app-submitDate-APPNUMBER |
+| ApplicationDescription des | Application详细信息                         |                          |
+| Date submitDate            | Application提交时间                         |                          |
+| RpcEndpointRef driver      | ClientEndpoint的RPC远端地址                 |                          |
+| Int defaultCores           | 默认的cpu cores,由 `spark.deploy.defaultCores` |                          |
+
+### WorkerInfo
+
+WorkerInfo 表示已经注册成功的Worker信息, 它的信息如下
+
+| **WorkerInfo**                            |  意义                                              | 默认 value                  |
+|-------------------------------------------|----------------------------------------------------|----------------------------|
+| String id                                 | worker的id                                         | worker-timestamp-host-port |
+| String host                               | worker的host地址                                   | spark-dell                 |
+| Int port                                  | worker的port号                                     | 42453 (这个是随机的)       |
+| Int cores                                 | worker总共可用的cpu cores, 由 SPARK_WORKER_CORES指定　| 机器上所有的 cpu cores     |
+| Int memory                                | worker总共可用的memory, SPARK_WORKER_MEMORY 默认    | 机器上所有 memory            |
+| RpcEndpointRef endpoint                   | worker的rpc远程代理, 通过它可以与worker进行rpc通信     |                            |
+| String webUiAddress                       | worker webui 地址                                  |                            |
+| Map[String, WorkerResourceInfo] resources | worker所拥有的资源信息                               |如 gpu->(gpu, (0, 1))       |
+
+### ExecutorDesc
+
+表示executor的信息
+
+| ExecutorDesc                              |  意义                                              | demo value                  |
+|-------------------------------------------|----------------------------------------------------|----------------------------|
+| Int id                                    | executor的id                                         |  一个整数值           |
+| ApplicationInfo application               | executor 将要运行的 app                              |                  |
+| WorkerInfo worker                         | executor是在哪个worker上分配的                       |              |
+| Int cores                                 | 分配给 executor总共可用的cpu cores                           |                           |
+| Int memory                                | App 指定的 executor总共可用的memory                             | 1024                       |
+| Map[String, ResourceInformation] resources | worker分配给executor的资源信息                       |                            |
