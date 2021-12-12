@@ -55,6 +55,8 @@ Spark 的 Deploy 过程如图所示
 
 往Master中注册Application, 根据注册给Driver端的Executor信息，调度Task, 并将结果传给用户.
 
+### 启动 Spark 集群
+
 通常情况下,我们通过 `$SPARK_HOME/sbin/start-all.sh` 这个脚本启动一个 Spark Standalone cluster. 也就是启动 Master 和 Worker 进程. 如 Step 1 ~ Step 3 所示.
 
 **step 1:**
@@ -65,6 +67,8 @@ Spark 的 Deploy 过程如图所示
 
 - Worker向Master发起注册信息，Master会给该Worker分配ＷorkerInfo用来表示该Worker的一些资源与属性，并将该WorkerInfo保存到Master的本地变量中
 - Worker收到Master的注册成功信息后，会开启心跳线程定时向worker发送HeartBeat,保持连接. 接着向Master报告WorkerLasteState，主要是excutors和drivers
+
+### 初始化 SparkContext
 
 当用户往 Spark cluster 中提交一个 Spark Application 时, 用户的代码会显示的初始化 SparkContext. 在初始化 SparkContext 的时候, 会发生如下的事情, 如 Step5 ~ step 18 所示.
 
@@ -88,6 +92,9 @@ Spark 的 Deploy 过程如图所示
 
 - Driver 在收到 Executor 向 Driver 发出 LaunchedExecutor 信息后，开始 makeOffers, 准备向 Executor schedule tasks.
 - Executor 收到 Task 并执行
+
+需要注意的是, StandaloneSchedulerBackend 会阻塞式的等着 Master 向 driver 发送 RegisteredApplication 消息,
+另外 TaskSchedulerImpl 也会默认等 30s 等着 backend ready. 当注册给 driver 的 executor cpu cores 满足一定的条件时才会 ready.
 
 ## Master如何分配Executor的
 
