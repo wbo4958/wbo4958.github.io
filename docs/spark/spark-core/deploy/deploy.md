@@ -31,7 +31,7 @@ Specifically, to run on a cluster, the SparkContext can connect to several types
 
 在main程序(被称为driver程序)的SparkContext对象的协调下，Spark Application作为独立的进程集在集群中运行
 
-具体来说，为了运行在集群环境中， SparkContext可以连接到多种集群Manager连接(如 Spark自带的standalone cluster maanger, Mesos or YARN)), 这些集群Manager跨进程为Spark Application分配资源. 一旦连接成功后， Spark获得了集群节点上的executor,　这些executor是为你的Application运行和保存数据的进程. 然后SparkContext将你的应用程序代码(传递给SparkContext的JAR文件或Python文件)发送给executor. 最后SparkContext将Task发送给exeuctor去运行
+具体来说，为了运行在集群环境中， SparkContext可以连接到多种集群Manager连接(如 Spark自带的standalone cluster maanger, Mesos or YARN)), 这些集群Manager跨进程为Spark Application分配资源. 一旦连接成功后， Spark获得了集群节点上的executor, 这些executor是为你的Application运行和保存数据的进程. 然后SparkContext将你的应用程序代码(传递给SparkContext的JAR文件或Python文件)发送给executor. 最后SparkContext将Task发送给exeuctor去运行
 
 Spark 的 Deploy 过程如图所示
 
@@ -41,19 +41,23 @@ Spark 的 Deploy 过程如图所示
 
 - Master
 
-也就是Spark自带的Standalone Manager，Master是spark的主节点，它负责管理Worker,并为注册App的在worker上分配executor等。
+也就是Spark自带的Standalone Manager， Master是spark的主节点，它负责管理Worker, 并为注册的 SparkApplication 在 worker 上分配executor等。
 
 - Worker
 
-管理Worker所在Node上被分配的资源，负责启动Executor
+管理Worker所在Node 被分配的资源，负责启动Executor. 并上报 Master 该 Worker 信息.
 
 - Executor
 
-负责执行Spark Application的Task
+负责执行Spark Application 的 Task
 
 - Driver
 
 往Master中注册Application, 根据注册给Driver端的Executor信息，调度Task, 并将结果传给用户.
+
+### 启动 Spark 集群
+
+通常情况下,我们通过 `$SPARK_HOME/sbin/start-all.sh` 这个脚本启动一个 Spark Standalone cluster. 也就是启动 Master 和 Worker 进程. 如 Step 1 ~ Step 3 所示.
 
 **step 1:**
 
@@ -64,9 +68,13 @@ Spark 的 Deploy 过程如图所示
 - Worker向Master发起注册信息，Master会给该Worker分配ＷorkerInfo用来表示该Worker的一些资源与属性，并将该WorkerInfo保存到Master的本地变量中
 - Worker收到Master的注册成功信息后，会开启心跳线程定时向worker发送HeartBeat,保持连接. 接着向Master报告WorkerLasteState，主要是excutors和drivers
 
+### 初始化 SparkContext
+
+当用户往 Spark cluster 中提交一个 Spark Application 时, 用户的代码会显示的初始化 SparkContext. 在初始化 SparkContext 的时候, 会发生如下的事情, 如 Step5 ~ step 18 所示.
+
 **step 5 - step 7**
 
-- App向Master注册Application,　Master为该Application生成ApplicationInfo，并保存到Master的变量中，请参考第一节
+- App向Master注册Application, Master为该Application生成ApplicationInfo，并保存到Master的变量中，请参考第一节
 
 **step 8 - step 12**
 
@@ -83,7 +91,10 @@ Spark 的 Deploy 过程如图所示
 **step 17 - step 18**
 
 - Driver 在收到 Executor 向 Driver 发出 LaunchedExecutor 信息后，开始 makeOffers, 准备向 Executor schedule tasks.
-- Executor 收到　Task 并执行
+- Executor 收到 Task 并执行
+
+需要注意的是, StandaloneSchedulerBackend 会阻塞式的等着 Master 向 driver 发送 RegisteredApplication 消息,
+另外 TaskSchedulerImpl 也会默认等 30s 等着 backend ready. 当注册给 driver 的 executor cpu cores 满足一定的条件时才会 ready.
 
 ## Master如何分配Executor的
 
@@ -100,7 +111,7 @@ private def startExecutorsOnWorkers(): Unit = {
     //coresPerExecutor是Application指定处理该Application时，executor所使用的cpu cores个数, 如果没有指定，则默认为１个
     val coresPerExecutor = app.desc.coresPerExecutor.getOrElse(1) 
     // If the cores left is less than the coresPerExecutor,the cores left will not be allocated
-    //　一般情况下app.coresLeft会非常大，所以会进入if分支
+    // 一般情况下app.coresLeft会非常大，所以会进入if分支
     if (app.coresLeft >= coresPerExecutor) {
       // Filter out workers that don't have enough resources to launch an executor
       // canLaunchExecutor主要判断该worker上free的cpu cores/memory/resource是否满足application需要
@@ -121,13 +132,13 @@ private def startExecutorsOnWorkers(): Unit = {
 }
 ```
 
-其中 `app.desc.coresPerExecutor`　由 `spark.executor.cores`(表示每个executor需要的 cpu cores) 指定, 如果该值太大，超过了已经注册的worker的free cores,　那么不会为该app分配executor, 而该app将会一直处于waitingApps中，等着resource可用。
+其中 `app.desc.coresPerExecutor` 由 `spark.executor.cores`(表示每个executor需要的 cpu cores) 指定, 如果该值太大，超过了已经注册的worker的free cores, 那么不会为该app分配executor, 而该app将会一直处于waitingApps中，等着resource可用。
 
 而`app.coresLeft`由下面的计算可得，一般情况下该值会非常大
 
 ``` scala
-//　desc.maxCores由spark.cores.max指定
-// defaultCores由　spark.deploy.defaultCores　指定，默认为 Int.MAX_VALUE
+// desc.maxCores由spark.cores.max指定
+// defaultCores由 spark.deploy.defaultCores 指定，默认为 Int.MAX_VALUE
 private val requestedCores = desc.maxCores.getOrElse(defaultCores)
 // coresGranted为已经获得的cpu cores
 def coresLeft: Int = requestedCores - coresGranted
@@ -139,9 +150,9 @@ private def scheduleExecutorsOnWorkers(
     usableWorkers: Array[WorkerInfo],
     spreadOutApps: Boolean): Array[Int] = {
   val coresPerExecutor = app.desc.coresPerExecutor
-  //　如果没有定义spark.executor.cores，minCoresPerExecutor则默认为１, 表示executor最少使用的cpu cores
+  // 如果没有定义spark.executor.cores，minCoresPerExecutor则默认为１, 表示executor最少使用的cpu cores
   val minCoresPerExecutor = coresPerExecutor.getOrElse(1) 
-  //　如果没有定义spark.executor.oneExecutorPerWorker为true, 它的意思是每个worker只产生一个executor
+  // 如果没有定义spark.executor.oneExecutorPerWorker为true, 它的意思是每个worker只产生一个executor
   val oneExecutorPerWorker = coresPerExecutor.isEmpty
   val memoryPerExecutor = app.desc.memoryPerExecutorMB
   val resourceReqsPerExecutor = app.desc.resourceReqsPerExecutor
@@ -175,7 +186,7 @@ private def scheduleExecutorsOnWorkers(
       }
       val enoughResources = ResourceUtils.resourcesMeetRequirements(
         resourcesFree, resourceReqsPerExecutor)
-      //　分得的executor数量不能多于app.executorLimit // 该值由 dynamic resource allocation 决定
+      // 分得的executor数量不能多于app.executorLimit // 该值由 dynamic resource allocation 决定
       val underLimit = assignedExecutors.sum + app.executors.size < app.executorLimit
       keepScheduling && enoughCores && enoughMemory && enoughResources && underLimit
     } else {
@@ -190,7 +201,7 @@ private def scheduleExecutorsOnWorkers(
   while (freeWorkers.nonEmpty) {
     freeWorkers.foreach { pos =>
       var keepScheduling = true
-      //　如果worker条件满足，开始分配cpu cores或executor给application
+      // 如果worker条件满足，开始分配cpu cores或executor给application
       while (keepScheduling && canLaunchExecutorForApp(pos)) { 
         coresToAssign -= minCoresPerExecutor
         assignedCores(pos) += minCoresPerExecutor //分配的cpu core保存到 assignedCores里
@@ -216,11 +227,11 @@ private def scheduleExecutorsOnWorkers(
 }
 ```
 
-`spreadOutApps ＝ true`　表示横向遍历,即依次遍历每个worker来满足app. 反之, 为纵向遍历，先遍历第一个worker的资源，如果还不满足app, 再遍历第二个worker，依此类推.
+`spreadOutApps ＝ true` 表示横向遍历,即依次遍历每个worker来满足app. 反之, 为纵向遍历，先遍历第一个worker的资源，如果还不满足app, 再遍历第二个worker，依此类推.
 
-`spreadOutApps`由`spark.deploy.spreadOut`控制，默认为true,　即横向遍历.
+`spreadOutApps`由`spark.deploy.spreadOut`控制，默认为true, 即横向遍历.
 
-在获得每个worker可分配的cpu cores后,　即`val assignedCores = scheduleExecutorsOnWorkers(app, usableWorkers, spreadOutApps)`
+在获得每个worker可分配的cpu cores后, 即`val assignedCores = scheduleExecutorsOnWorkers(app, usableWorkers, spreadOutApps)`
 
 ``` scala
 val assignedCores = scheduleExecutorsOnWorkers(app, usableWorkers, spreadOutApps)
@@ -308,7 +319,7 @@ spreadOut=false的情况，先将一个worker分配完再去check另一个worker
 | worker3  | 2           | 1             | 2                    |
 
 在这种情况下，只有一个exeuctor, 只要 `memoryPerExecutor <= Total executor memeory` 即可.
-同理可以推得其它种case, 可以参考 Master　的测试类.
+同理可以推得其它种case, 可以参考 Master 的测试类.
 
 ## 相关类
 
@@ -324,12 +335,12 @@ spreadOut=false的情况，先将一个worker分配完再去check另一个worker
 | Command command                                  | Worker 启动 Executor 的 Command 信息                              |                       |
 | String appUiUrl                                  | Application的UI url                                | http://192.168.xx.xx:4040 |
 | Seq[ResourceRequirement] resourceReqsPerExecutor | worker的rpc远程代理, 通过它可以与worker进行rpc通信      |                           |
-| Option[Int] coresPerExecutor                     | 每个executor所要使用的cpu cores  `spark.executor.cores`     | None,　默认是全部 cpu core  |
+| Option[Int] coresPerExecutor                     | 每个executor所要使用的cpu cores  `spark.executor.cores`     | None, 默认是全部 cpu core  |
 | Option[Int] initialExecutorLimit                 | 该Application需要启动的executor上限                |       None                  |
 
 - Command
 
-Command 用来描述　Worker 怎么启动一个 JVM executor 进程
+Command 用来描述 Worker 怎么启动一个 JVM executor 进程
 
 | Command           |  变量意义               | dem value  |
 | --- | --- | --- |
@@ -362,7 +373,7 @@ WorkerInfo 表示已经注册成功的Worker信息, 它的信息如下
 | String id                                 | worker的id                                         | worker-timestamp-host-port |
 | String host                               | worker的host地址                                   | spark-dell                 |
 | Int port                                  | worker的port号                                     | 42453 (这个是随机的)       |
-| Int cores                                 | worker总共可用的cpu cores, 由 SPARK_WORKER_CORES指定　| 机器上所有的 cpu cores     |
+| Int cores                                 | worker总共可用的cpu cores, 由 SPARK_WORKER_CORES指定 | 机器上所有的 cpu cores     |
 | Int memory                                | worker总共可用的memory, SPARK_WORKER_MEMORY 默认    | 机器上所有 memory            |
 | RpcEndpointRef endpoint                   | worker的rpc远程代理, 通过它可以与worker进行rpc通信     |                            |
 | String webUiAddress                       | worker webui 地址                                  |                            |
