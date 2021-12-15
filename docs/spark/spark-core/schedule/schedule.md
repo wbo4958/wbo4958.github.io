@@ -33,7 +33,7 @@ def submitJob[T, U](
 
 从 submitJob 的参数来看, Spark Scheduler 对用户是不可见的. 用户只关心将 job 提交给 Spark 后能得到正确的结果,且 performance 要好.
 
-什么是 RDD? 分布式计算的本质是 `移动数据`与`计算函数` 到计算节点进行计算并返回计算结果. 在 Spark 中, RDD 即是数据与计算函数的载体. 即 Spark scheduler 会将 RDD 与 其计算函数打包发送到 Executor 计算. Spark 中有很多种不同类型的 RDD, 有些 RDD 只提供数据, 如 ParallelCollectionRDD, 而有些 RDD 只提供计算函数, 如 MapPartitionsRDD.s
+什么是 RDD? 分布式计算的本质是 `移动数据`与`计算函数` 到计算节点进行计算并返回计算结果, 这里的移动数据仅仅表示是数据的Meta信息而非真实的数据. 在 Spark 中, RDD 即是数据与计算函数的载体. 即 Spark scheduler 会将 RDD 与 其计算函数打包发送到 Executor 计算. Spark 中有很多种不同类型的 RDD, 有些 RDD 只提供数据, 如 ParallelCollectionRDD, 而有些 RDD 只提供计算函数, 如 MapPartitionsRDD.s
 
 下面这张图基本上描述了 Spark 怎么样调度一个 Task.
 
