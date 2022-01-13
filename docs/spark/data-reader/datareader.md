@@ -200,24 +200,41 @@ Try(Literal.create(Integer.parseInt(raw), IntegerType))
 
 - **partitionSchema**
   
-  用来分区的 schema, 本例为
+  以某列进行分区的 schema, 本例为
 
   ``` scala
-  StructType(
+  StructType(Array(
     StructField("class", IntegerType)
-  )
+  ))
   ```
 
 - **dataSchema**
 
-  非 partition schema. 如果用户指定了 userSpecifiedSchema, dataSchema=(userSpecifiedSchema - partitionSchema), 如果用户没有指定 userSpecifiedSchema, dataSchema=inferSchema(), 需要自行推断出. 本例为
+  非 partition 的schema. 如果用户指定了 userSpecifiedSchema, dataSchema=(userSpecifiedSchema - partitionSchema), 如果用户没有指定 userSpecifiedSchema, dataSchema需要 Spark 自行从文件中推断出来,即整个文件的 schema. 本例为
 
   ``` scala
-  StructType(
+  StructType(Array(
     StructField("name", StringType),
     StructField("number", IntegerType),
     StructField("math", IntegerType),
-  )
+  ))
+  ```
+
+- **readDataSchema**
+  
+  用户指定需要读取的 schema, 如下所示
+
+  ``` scala
+  val df = spark.read.format("parquet").schema(schema).load(resource1).toDF()
+  df.select("name").show()
+  ```
+
+  readDataSchema 就是
+  
+  ``` scala
+  StructType(Array(
+    StructField("name", StringType)
+  ))
   ```
 
 下面这张图描述了怎么样推断出 Parquet 的 schema. ![parquet-infer-schema](/docs/spark/data-reader/datareader-parquet-infer-schema.svg)
