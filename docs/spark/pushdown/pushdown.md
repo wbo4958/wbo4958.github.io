@@ -204,7 +204,7 @@ relation.fileFormat.buildReaderWithPartitionValues(
 
 如图所示
 
-![v1 filter pushdown](/docs/spark/filter-pushdown/datareader-v1-buildReader.drawio.svg)
+![v1 filter pushdown](/docs/spark/pushdown/datareader-v1-buildReader.drawio.svg)
 
 #### V2 Datasource
 
@@ -219,7 +219,7 @@ V2 版的 DataSource LogicalPlan 为 DataSourceV2Relation, Spark Optimizer 为�
 
 BatchScanExec 通过 Scan 执行 partition filter, 然后创建 FilePartitionReaderFactory, 最后在真正创建 reader 时执行对应的 filter pushdown. 如图所示,
 
-![v2 filter pushdown](/docs/spark/filter-pushdown/datareader-v2-filterpushdown.drawio.svg)
+![v2 filter pushdown](/docs/spark/pushdown/datareader-v2-filterpushdown.drawio.svg)
 
 ## Aggregate pushdown
 
