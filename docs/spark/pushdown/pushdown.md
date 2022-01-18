@@ -57,26 +57,39 @@ Project [a#0]
 
 PushPredicateThroughNonJoin 要求 operator 和 filter expression 是 deterministic.
 
-以 window 为例
+以 Aggregate 为例
 
 ``` scala
-Filter (a#0 > 1)
-+- Project [a#0, b#1, c#2, window#11L]
-   +- Project [a#0, b#1, c#2, window#11L, window#11L]
-      +- Window [count(b#1) windowspecdefinition(a#0, b#1 ASC NULLS FIRST, specifiedwindowframe(RangeFrame, unboundedpreceding$(), currentrow$())) AS window#11L], [a#0], [b#1 ASC NULLS FIRST]
-         +- Project [a#0, b#1, c#2]
-            +- LocalRelation <empty>, [a#0, b#1, c#2]
+Filter (a#0 > 5)
++- Aggregate [a#0], [a#0]
+   +- LocalRelation <empty>, [a#0, b#1, c#2]
 ```
 
-Filter 已经 push 到 window 下面了
+Filter 已经 push 到 Aggregate 下面了
 
 ``` scala
-Project [a#0, b#1, c#2, window#11L]
-+- Project [a#0, b#1, c#2, window#11L, window#11L]
-   +- Window [count(b#1) windowspecdefinition(a#0, b#1 ASC NULLS FIRST, specifiedwindowframe(RangeFrame, unboundedpreceding$(), currentrow$())) AS window#11L], [a#0], [b#1 ASC NULLS FIRST]
-      +- Project [a#0, b#1, c#2]
-         +- Filter (a#0 > 1)
-            +- LocalRelation <empty>, [a#0, b#1, c#2]
+Aggregate [a#0], [a#0]
++- Filter (a#0 > 5)
+   +- LocalRelation <empty>, [a#0, b#1, c#2]
+```
+
+如果 Filter 的条件有 non-deterministic 的 expression, 则 non-deterministic 的 expression 不会 push 到, 只 push deterministic expression
+
+如
+
+``` scala
+Filter ((a#0 > 5) AND (rand(10) > cast(5 as double)))
++- Aggregate [a#0], [a#0]
+   +- LocalRelation <empty>, [a#0, b#1, c#2]
+```
+
+filter push 后如下所示
+
+``` scala
+Filter (rand(10) > cast(5 as double)) //RAND 为 non deterministic expression, 不会 push
++- Aggregate [a#0], [a#0]
+   +- Filter (a#0 > 5) //　只 push deterministic expression
+      +- LocalRelation <empty>, [a#0, b#1, c#2]
 ```
 
 #### PushPredicateThroughJoin
