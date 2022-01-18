@@ -51,26 +51,39 @@ df.show()
 
 ## LogicalPlan
 
+Spark 使用 Aggregate 来表示一个 GroupBy operator.
+
 ### Aggregate
 
-| Aggregate | 描述 Aggregate 过程 |
+| Aggregate | 描述 GroupBy operator |
 | --- | --- |
 | groupingExpressions: Seq[Expression] | 需要对哪些 column 进行 group by |
-| aggregateExpressions: Seq[NamedExpression] | Project list 里的 AttributeReference (比如 group by列的 AtributeReference) 和一些 AggregateExpression |
+| aggregateExpressions: Seq[NamedExpression] | group by columns + agg(聚合) expressions |
+
+> `spark.sql.retainGroupColumns`　控制是否保留 group by 的 columns. 默认为 true.
+
+`val df = df0.groupBy("dept").agg(functions.max('age))` 优化后的 LogicalPlan 如下所示,
+
+``` scala
+== Optimized Logical Plan ==
+
+//第一个参数表示 group by columns
+// 第二个参数是 group by column + agg expression(max("age"))
+Aggregate [dept#10], [dept#10, max(age#12) AS max(age)#20]
++- LocalRelation [dept#10, age#12]
+```
 
 如果 Aggregate 中 groupingExpressions 为空, 此时 Aggregatiion 退化为 Reduction.
 
 如
 
 ``` scala
-scala> df0.select(max('age)).show()
-+--------+
-|max(age)|
-+--------+
-|      50|
-+--------+
+scala> df0.select(max('age)).explain(true) //或 df0.agg(max('age)).show()
 
-scala> df0.agg(max('age)).show()
+== Optimized Logical Plan ==
+Aggregate [max(age#12) AS max(age)#17]
++- LocalRelation [age#12]
+
 +--------+
 |max(age)|
 +--------+
@@ -80,7 +93,7 @@ scala> df0.agg(max('age)).show()
 
 此时对整个 agg 列做 reduction 操作.
 
-相反带上 group by 后，对相同 group 分别做 reduction. 如,
+如果带上 group by 后, 只对具有相同值的 group 分别做 reduction. 如,
 
 ``` scala
 scala> df0.groupBy("dept").max("age").show()
@@ -95,10 +108,10 @@ scala> df0.groupBy("dept").max("age").show()
 
 ### AggregateExpression
 
-| AggregateExpression | 描述一个 agg function |
+| AggregateExpression | 聚合表达式 |
 | --- | --- |
-| aggregateFunction: AggregateFunction | agg function |
-| mode: AggregateMode | Complete/Partial/PartialMerge/Final |
+| aggregateFunction: AggregateFunction | 聚合函数 |
+| mode: AggregateMode | 聚合方式, Complete/Partial/PartialMerge/Final |
 | isDistinct | 是否有 DISTINCT 修饰该 function |
 | filter: Option[Expression | 该 function 是否有 filter |
 
