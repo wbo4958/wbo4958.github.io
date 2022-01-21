@@ -28,7 +28,7 @@ CombineFilters 遍历整个 Analyzed LogicalPlan, 将相邻的两个 Filter (且
 进行合并.
 
 ``` scala
-'Filter ('b > 3)
+'Filter ('a > 3)
 +- 'Filter ('a > 2)
    +- 'Filter ('a > 1)
       +- 'Project ['a]
@@ -38,10 +38,9 @@ CombineFilters 遍历整个 Analyzed LogicalPlan, 将相邻的两个 Filter (且
 如上面的 LogicalPlan 经过 CombineFilters 优化后的 LogicalPlan 如下所示,
 
 ``` scala
-Project [a#0]
-+- Filter ((a#0 > 1) AND ((a#0 > 2) AND (b#1 > 3)))
-   +- Project [a#0, b#1]
-      +- LocalRelation <empty>, [a#0, b#1, c#2]
+Filter ((a#0 > 1) AND ((a#0 > 2) AND (a#0 > 3)))
++- Project [a#0]
+   +- LocalRelation <empty>, [a#0, b#1, c#2]
 ```
 
 ### PushPredicateThroughNonJoin
