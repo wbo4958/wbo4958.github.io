@@ -60,15 +60,15 @@ val df = spark.read.parquet("~/data/student/student-parquet")
 df.select(functions.max("english")).explain(true)
 
 == Optimized Logical Plan ==
-Aggregate [max(max(english)#15) AS max(english)#13]
-+- RelationV2[max(english)#15] parquet file:/home/bobwang/data/student/student-parquet
+Aggregate [max(english#2) AS max(english)#19]
++- RelationV2[english#2] parquet file:/home/bobwang/data/student/student-parquet
 
 == Physical Plan ==
-*(2) HashAggregate(keys=[], functions=[max(max(english)#15)], output=[max(english)#13])
+*(2) HashAggregate(keys=[], functions=[max(english#2)], output=[max(english)#19])
 +- Exchange SinglePartition, ENSURE_REQUIREMENTS, [id=#20]
-   +- *(1) HashAggregate(keys=[], functions=[partial_max(max(english)#15)], output=[max#17])
+   +- *(1) HashAggregate(keys=[], functions=[partial_max(english#2)], output=[max#23])
       +- *(1) ColumnarToRow
-         +- BatchScan[max(english)#15] ParquetScan DataFilters: [], Format: parquet, Location: InMemoryFileIndex(1 paths)[file:/home/bobwang/data/student/student-parquet], PartitionFilters: [], PushedAggregation: [MAX(english)], PushedFilters: [], PushedGroupBy: [], ReadSchema: struct<max(english):float>, PushedFilters: [], PushedAggregation: [MAX(english)], PushedGroupBy: [] RuntimeFilters: []
+         +- BatchScan[english#2] ParquetScan DataFilters: [], Format: parquet, Location: InMemoryFileIndex(1 paths)[file:/home/bobwang/data/student/student-parquet], PartitionFilters: [], PushedAggregation: [], PushedFilters: [], PushedGroupBy: [], ReadSchema: struct<english:float>, PushedFilters: [], PushedAggregation: [], PushedGroupBy: [] RuntimeFilters: []
 ```
 
 可以从 Pysical Plan 看出 PushedGroupBy, PushedAggregation 为 空.
