@@ -47,7 +47,7 @@ MemoryManager 负责管理内存, 如何 allocate/reallocate/free, 如何 copy�
 
 Arrow 提供了对应的 Array 的 builder 构建 Array. 下面以 NumericBuilder 为例进行说明,
 
-- Numeric Builder
+- Numeric Array
 
 ``` cpp
   arrow::Int32Builder int32builder;  // 生成 Int32Builder 用来build Int32 Array
@@ -68,8 +68,91 @@ Arrow 提供了对应的 Array 的 builder 构建 Array. 下面以 NumericBuilde
 
 ![builder](/docs/arrow/arrow-cpp/images/arrow-cpp-builder.drawio.svg)
 
-特别需要注意, 上述的例子中, 初始化时为该 builder 分配了 32 个 elements, 也就是 32 * 4 = 128 个字节保存数据.
-但是最后实际上只存放了 8 个 elements, 也就是实际只有 8*4=32 个字节的数据, 但是 Arrow-cpp 要求 64 字节对齐,
+特别需要注意, 上述的例子中, 初始化时为该 builder 分配了 32 个 elements, 也就是 `32 * 4 = 128` 个字节保存数据.
+但是最后实际上只存放了 8 个 elements, 也就是实际只有 `8*4=32` 个字节的数据, 但是 Arrow-cpp 要求 64 字节对齐,
 所以最后会重新分配 64 字节的大小,然后将数据(32bytes) memcpy 到新的内存中.
 
+- String Array
 
+String builder 包含3个 buffer builder: null bitmap buffer builder, value_data_builder_ 以及 offsets_builder_.
+
+所有的string依次放在 value_data_builder buffer中, offsets 记录每个 string 的 offset.
+
+最后 build 出来的 StringArray 中三个 buffers 依次是 `null_bitmap`, `offset`, `values`.
+
+- Struct Builder
+
+``` cpp
+  std::shared_ptr<arrow::DataType> type_;
+  std::shared_ptr<arrow::StructBuilder> builder_;
+  std::shared_ptr<arrow::StructArray> result_;
+  std::vector<std::shared_ptr<arrow::Field>> value_fields_;
+
+  std::vector<std::shared_ptr<arrow::Field>> fields;
+  fields.push_back(arrow::field("int16", arrow::int16()));
+  fields.push_back(arrow::field("int32", arrow::int32()));
+
+  type_ = struct_(fields);
+  value_fields_ = fields;
+
+  std::unique_ptr<arrow::ArrayBuilder> tmp;
+  RETURN_NOT_OK(MakeBuilder(arrow::default_memory_pool(), type_, &tmp));
+  builder_.reset(arrow::internal::checked_cast<arrow::StructBuilder *>(tmp.release()));
+
+  // 获得 struct 中的第一个 field
+  arrow::Int16Builder *int16_vb = arrow::internal::checked_cast<arrow::Int16Builder *>(
+    builder_->field_builder(0));
+  // 获得 struct 中的第二个 field
+  arrow::Int32Builder *int32_vb = arrow::internal::checked_cast<arrow::Int32Builder *>(
+    builder_->field_builder(1));
+
+  // 第一个 element
+  RETURN_NOT_OK(builder_->Append()); // 表示即将为该struct append一个element
+  RETURN_NOT_OK(int16_vb->Append(1));
+  RETURN_NOT_OK(int32_vb->Append(2));
+
+  // 第二个 element
+  RETURN_NOT_OK(builder_->AppendNull()); // 表示即将为该struct append一个null
+
+  // 第三个 element
+  RETURN_NOT_OK(builder_->Append()); // 表示即将为该struct append一个element
+  RETURN_NOT_OK(int16_vb->AppendNull()); // 第一列为 null
+  RETURN_NOT_OK(int32_vb->Append(2));
+
+  std::shared_ptr<arrow::Array> out;
+  ARROW_ASSIGN_OR_RAISE(out, builder_->Finish());
+
+  std::cout << out->ToString() << std::endl;
+```
+
+Struct Builder 包含 null_bitmap builder 以及 children builder. 最后 build 出来的 StructArray 包含一个 null bitmap buffer,
+以及所有的 children buffers.
+
+- List builder
+
+``` cpp
+  auto pool = arrow::default_memory_pool();
+  arrow::ListBuilder listBuilder(pool, std::make_unique<arrow::Int16Builder>(pool));
+
+  // 获得 value builder
+  auto int16_vb = static_cast<arrow::Int16Builder *>(listBuilder.value_builder());
+
+  // 第一个 element
+  RETURN_NOT_OK(listBuilder.Append());
+  RETURN_NOT_OK(int16_vb->Append(1));
+  RETURN_NOT_OK(int16_vb->Append(2));
+
+  // 第二个 element
+  RETURN_NOT_OK(listBuilder.Append());
+  RETURN_NOT_OK(int16_vb->Append(6));
+  RETURN_NOT_OK(int16_vb->AppendNull());
+  RETURN_NOT_OK(int16_vb->Append(8));
+
+  std::shared_ptr<arrow::Array> out;
+  ARROW_ASSIGN_OR_RAISE(out, listBuilder.Finish());
+
+  std::cout << out->ToString() << std::endl;
+```
+
+ListBuilder 由 null_bitmap builder, offset builder 以及 value_builder构成, 最后生成的
+ListArray由 buffers (null bitmap buffer, offset buffer) 以及  child Array.
