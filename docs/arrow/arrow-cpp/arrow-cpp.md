@@ -156,3 +156,56 @@ Struct Builder 包含 null_bitmap builder 以及 children builder. 最后 build 
 
 ListBuilder 由 null_bitmap builder, offset builder 以及 value_builder构成, 最后生成的
 ListArray由 buffers (null bitmap buffer, offset buffer) 以及  child Array.
+
+## Table && RecordBatch
+
+- Table
+
+![Table](/docs/arrow/arrow-cpp/images/arrow-cpp-Table.drawio.svg)
+
+- RecordBatch
+
+![RecordBatch](/docs/arrow/arrow-cpp/images/arrow-cpp-RecordBatch.drawio.svg)
+
+Array 是 1-D 的数据结构, 而 Table 和 RecordBatch 是由多个 Array 组合成的带着 schema 信息的 2-D 数据结构.
+
+Table 与 RecordBatch 的区别如官网所示
+
+![Table vs record batch](/docs/arrow/arrow-cpp/images/tables-versus-record-batches.svg)
+
+> Record batches can be sent between implementations, such as via IPC or via the C Data Interface. 
+Tables and chunked arrays, on the other hand, are concepts in the C++ implementation, not in the 
+Arrow format itself, so they aren’t directly portable.
+
+``` cpp
+// 创建 schema
+  std::shared_ptr<arrow::Field> field_day, field_month, field_year;
+  std::shared_ptr<arrow::Schema> schema;
+
+  field_day = arrow::field("Day", arrow::int8());
+  field_month = arrow::field("Month", arrow::int8());
+  field_year = arrow::field("Year", arrow::int16());
+
+  schema = arrow::schema({field_day, field_month, field_year});
+
+// 创建 RecordBatch
+
+  std::shared_ptr<arrow::RecordBatch> rbatch;
+  rbatch = arrow::RecordBatch::Make(schema, days->length(), {days, months, years});
+
+// 创建 ChunkedArray
+  arrow::ArrayVector day_vecs{days, days2};
+  std::shared_ptr<arrow::ChunkedArray> day_chunks =
+      std::make_shared<arrow::ChunkedArray>(day_vecs);
+  arrow::ArrayVector month_vecs{months, months};
+  std::shared_ptr<arrow::ChunkedArray> month_chunks =
+      std::make_shared<arrow::ChunkedArray>(month_vecs);
+
+  arrow::ArrayVector year_vecs{years, years2};
+  std::shared_ptr<arrow::ChunkedArray> year_chunks =
+      std::make_shared<arrow::ChunkedArray>(year_vecs);
+
+// 创建 Table
+  std::shared_ptr<arrow::Table> table;
+  table = arrow::Table::Make(schema, {day_chunks, month_chunks, year_chunks}, 10);
+```
