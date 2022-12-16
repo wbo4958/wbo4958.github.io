@@ -211,3 +211,5 @@ def treeAggregate[U: ClassTag](zeroValue: U)(
 最后再在 driver 端将 所有的结果进行 combOp. 通过引入中间 shuffle stage 可以避免 aggregate 将所有结果拉回 driver 计算时出现 OOM.
 
 ![treeAgg](/docs/spark/rdd-agg/spark-ml-treeAggregate.drawio.svg)
+
+refer to [https://www.cnblogs.com/xing901022/p/9285898.html](https://www.cnblogs.com/xing901022/p/9285898.html)
