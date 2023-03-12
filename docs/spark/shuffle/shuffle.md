@@ -8,7 +8,7 @@ parent: Spark
 # Spark Shuffle
 {: .no_toc}
 
-本文通过代码学习 Spark 中 window 函数的实现. 本文基于 Spark 3.2.0
+本文通过 repartition 学习 Spark 中 shuffle 的实现. 本文基于 Spark 3.2.0
 
 ``` scala
 val df = Seq(1, 2, 3, 4, 5, 6).toDS()

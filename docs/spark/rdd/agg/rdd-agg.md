@@ -1,8 +1,9 @@
 ---
 layout: page
-title: RDD-aggregate/treeAggregate
+title: aggregate/treeAggregate
 nav_order:  10000000
-parent: Spark 
+parent: RDD 
+grand_parent: Spark
 ---
 
 # Spark RDD aggregate/treeAggregate
@@ -118,7 +119,7 @@ def aggregate[U: ClassTag](zeroValue: U)(seqOp: (U, T) => U, combOp: (U, U) => U
 也就是 `scala iterator.aggregate()`. 最后在 Driver 端执行 `combOp`.
 
 
-![agg](/docs/spark/rdd-agg/spark-ml-aggregate.drawio.svg)
+![agg](/docs/spark/rdd/agg/spark-ml-aggregate.drawio.svg)
 
 ## treeAggregate
 
@@ -210,6 +211,6 @@ def treeAggregate[U: ClassTag](zeroValue: U)(
 相对于 aggregate, treeAggregate 引入中间一个或多个 shuffle stage 将具有相同 hash value 的 上个 stage 的 task seqOp 的结果进行 combOp.
 最后再在 driver 端将 所有的结果进行 combOp. 通过引入中间 shuffle stage 可以避免 aggregate 将所有结果拉回 driver 计算时出现 OOM.
 
-![treeAgg](/docs/spark/rdd-agg/spark-ml-treeAggregate.drawio.svg)
+![treeAgg](/docs/spark/rdd/agg/spark-ml-treeAggregate.drawio.svg)
 
 refer to [https://www.cnblogs.com/xing901022/p/9285898.html](https://www.cnblogs.com/xing901022/p/9285898.html)
