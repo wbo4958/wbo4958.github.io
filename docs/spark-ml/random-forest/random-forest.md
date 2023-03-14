@@ -269,7 +269,7 @@ Driver 端在 collect best split 后, 开始构造 Learning Tree.
 1. 如果 left.prediction == right.prediction, 则该 LearningNode 作为 LeafNode, 否则作为 InternalNode
 2. 如果该 LearningNode 没有 left/right, 则作为 LeafNode.
 
-### 什么是 prediction
+- prediction
 
 上面所说的 prediction 对于  RandomForestClassifier 来说也就是该节点 predict 后的 label. 对于 GiniAgg 来说
 
@@ -284,14 +284,113 @@ Driver 端在 collect best split 后, 开始构造 Learning Tree.
 如有个 stats 是 [0, 44, 2] 则 predict 为 1, 即 label 1.
 
 
-### raw prediction
+### predictRaw
 
-TODO
+``` scala
+  override def predictRaw(features: Vector): Vector = {
+    val votes = Array.ofDim[Double](numClasses)
+    _trees.foreach { tree =>
+      val classCounts = tree.rootNode.predictImpl(features).impurityStats.stats
+      val total = classCounts.sum
+      if (total != 0) {
+        var i = 0
+        while (i < numClasses) {
+          votes(i) += classCounts(i) / total
+          i += 1
+        }
+      }
+    }
+    Vectors.dense(votes)
+  }
+```
 
-### probability prediction
+predictRaw 是依次遍历所有的 tree 对 sample 进行 predict, 获得每棵树所在的 LeafNode, 从而获得 stats 信息,
+比如对于 sample `Vectors.dense(6.2, 3.4, 5.4, 2.3)`, 最终 tree1 predict出来的stats为 [0, 0, 35],
+vote = [0, 0, 35/total(35)], 而 tree2 predict 出来的 stats 为 [0, 0, 42], vote为[0, 0,42/total(42)]
+最终所有的 note 进行相加得 [0, 0, 2]
 
-TODO
+### predictLeaf
+
+``` scala
+  def predictLeaf(features: Vector): Vector = {
+    val indices = trees.map(_.predictLeaf(features))
+    Vectors.dense(indices)
+  }
+
+  def predictLeaf(features: Vector): Double = {
+    leafIndices(rootNode.predictImpl(features)).toDouble // leafIndices 为tree 中所有的 LeafNodes 的 index
+  }
+```
+
+predictLeaf 返回 sample 被分到的 leaf node 的 index.
+
+对于 `Vectors.dense(6.2, 3.4, 5.4, 2.3)` 最后得到 Vectors.dense([6, 10]), 即第一棵返回 leaf node id=6, 而第二棵树
+返回的 leaf node id=10.
+
+### predictProbability
+
+``` scala
+  def predictProbability(features: FeaturesType): Vector = {
+    val rawPreds = predictRaw(features)
+    raw2probabilityInPlace(rawPreds)
+  }
+
+  def raw2probabilityInPlace(rawPrediction: Vector): Vector = {
+    rawPrediction match {
+      case dv: DenseVector =>
+        ProbabilisticClassificationModel.normalizeToProbabilitiesInPlace(dv)
+        dv
+      case sv: SparseVector =>
+        throw new RuntimeException("Unexpected error in RandomForestClassificationModel:" +
+          " raw2probabilityInPlace encountered SparseVector")
+    }
+  }
+
+  def normalizeToProbabilitiesInPlace(v: DenseVector): Unit = {
+    v.values.foreach(value => require(value >= 0,
+      "The input raw predictions should be nonnegative."))
+    val sum = v.values.sum
+    require(sum > 0, "Can't normalize the 0-vector.")
+    var i = 0
+    val size = v.size
+    while (i < size) {
+      v.values(i) /= sum
+      i += 1
+    }
+  }
+```
+
+predictProbability 首先 predict 出原始值, 然后将 prediction 转换为 probability, 每个 label 的probability等于
+
+`label count / total count)`, 对于 `Vectors.dense(6.2, 3.4, 5.4, 2.3)` 最后得到 `[0, 0, 100%]`
+
+### predict
+
+``` scala
+def predict(features: FeaturesType): Double = {
+  raw2prediction(predictRaw(features))
+}
+```
+
+predict 函数对 raw prediction 转换为最终的 label.
+
+``` scala
+def raw2prediction(rawPrediction: Vector): Double = {
+    if (!isDefined(thresholds)) {
+      rawPrediction.argmax
+    } else {
+      probability2prediction(raw2probability(rawPrediction))
+    }
+  }
+```
+
+如果没有定义 thresholds, 则直接返回 raw prediction 中最大值所在的 index 即为 label. 
+
+否则 先算出 raw prediction 的概率 (label count / total count), 然后除 threshold 找到最大值所在的 index.
 
 ### feature importance
 
-TODO
+依次遍历所有的 tree 的 InternalNode, 然后获得 `split feature id` 与 `gain (node gain * count)`, 然后
+将同一个 feature 的所有 gain 相加然后进行 normalize. 最后得到的结果为
+
+`SparseVector (4,[0,1,2,3],[0.158,0.027,0.582,0.231])` 可以看出 feature 3 最重要, 重要程度达到 58.2%
