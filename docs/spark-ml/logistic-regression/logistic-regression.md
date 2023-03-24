@@ -53,7 +53,7 @@ LogisticRegression 首先通过一个 Job 计算出 dataset 中每个 feature �
 迭待优化算法) 但是 gradient descent 收敛慢. 于是出现了 newton's method, newton's method 收敛更快, 
 但是需要进行大量 Hessian 矩阵计算. 于是出现了 BGFS/LBGFS 是一种类牛顿方法, 但只计算一个和 Hessian 近似的矩阵. 参考[Gradient Descent vs L-BFGS-B](https://gbhat.com/machine_learning/sgd_vs_lbfgsb.html).
 
-Spark 对于 Lasso/Ridge/ElasticNet 采用不同的优化器, 如 BreezeLBFGSB, BreezeLBFGS 和 BreezeOWLQN.
+同时Spark 对于 L1/L2 采用不同的优化器, 如 BreezeLBFGSB, BreezeLBFGS 和 BreezeOWLQN.
 
 本例中使用的是 BreezeLBFGSB
 
@@ -70,7 +70,7 @@ intercept = log{P(1) / P(0)} = log{count_1 / count_0}
 
 ## Train
 
-有了上面的准备信息, 就可以开始 train 了.
+有了上面的准备, 就可以开始 train 了.
 
 LogisticRegression 作为入口函数, 在进入 infinite Iterations 之前先 train 一次 获得初始 State 信息,
 然后进入 iteration. 
@@ -110,10 +110,10 @@ LogisticRegression 作为入口函数, 在进入 infinite Iterations 之前先 t
 
 所以可以看出来, treeAggregate 是计算 loss 与 gradient 的.
 
-- BinaryLogisticBlockAggregator
+#### BinaryLogisticBlockAggregator
 
-对于 LogisticRegression Binary classification, 采用 BinaryLogisticBlockAggregator aggregator 计算
-loss 与 gradient. 根据 [loss-function] https://spark.apache.org/docs/latest/mllib-linear-methods.html#loss-functions
+对于 LogisticRegression Binary classification, 采用 BinaryLogisticBlockAggregator aggregator 根据 [loss-function](https://spark.apache.org/docs/latest/mllib-linear-methods.html#loss-functions) 计算
+loss 与 gradient. 
 
 ``` scala
   // 处理当前 block
@@ -123,7 +123,7 @@ loss 与 gradient. 根据 [loss-function] https://spark.apache.org/docs/latest/m
     val size = block.size
 
     // arr here represents margins
-    // 注意这个 margin 并不是与 label 相比较, 而是 h(x)= Sum(Wi * Xi) 的值
+    // 注意这个 margin 并不是与 label 之间的 margin, 而是 h(x)= Sum(Wi * Xi) 的值
     val arr = Array.ofDim[Double](size)
     if (fitIntercept) { 
       // 是否在训练时也训练出 intercept 值
@@ -195,3 +195,21 @@ loss 与 gradient. 根据 [loss-function] https://spark.apache.org/docs/latest/m
 - 2. arr = A * coefficients + arr  获得 prediction value + margins, 计算出关于h(x)的prediction值并加上 margins
 - 3. 依次计算出每个 sample 基于 arr 的 loss, 以及关于 label 的 multiplier
 - 4. 根据 multiplier 计算出梯度.
+
+整个迭待过程如下所示.
+
+在计算 loss 和 gradient 之前, 会对 sample 进行 scale. 具体是每个 sample * (inversed std)
+本例的 samples 只有一个 feature,
+
+```
+samples: [46 69 32 60 52 41]
+
+mean = 50
+std = 13.311649
+inversed std = 1/13.311649 = 0.075122
+scaledMean = mean * (inversed std) = 50 * 0.075122 = 3.75611
+
+samples = samples * (inversed std) = [3.45561995, 5.1834299, 2.4039095, 4.5073303, 3.906353, 3.080009]
+```
+
+- Iteration 1
