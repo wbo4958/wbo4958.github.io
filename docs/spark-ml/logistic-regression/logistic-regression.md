@@ -78,7 +78,7 @@ LogisticRegression 作为入口函数, 在进入 infinite Iterations 之前先 t
 每一次 iteration 都会调用 rdd.treeAggregate 计算相应的梯度, loss 等相关信息, 且将计算结果收集回 driver
 端保存在 state 中, 并判断是否收敛.
 
-### 计算什么?
+### 到底计算什么?
 
 每一次 iteration 其实是一个 Spark Job, 通过 RDD.treeAggregate 计算每个 partition 的 loss sum, 以及 gradient 值.
 
@@ -110,7 +110,7 @@ LogisticRegression 作为入口函数, 在进入 infinite Iterations 之前先 t
 
 所以可以看出来, treeAggregate 是计算 loss 与 gradient 的.
 
-#### BinaryLogisticBlockAggregator
+### BinaryLogisticBlockAggregator
 
 对于 LogisticRegression Binary classification, 采用 BinaryLogisticBlockAggregator aggregator 根据 [loss-function](https://spark.apache.org/docs/latest/mllib-linear-methods.html#loss-functions) 计算
 loss 与 gradient. 
@@ -191,17 +191,15 @@ loss 与 gradient.
 
 上面的过程很简单,
 
-- 1. 根据 coefficients 计算出 h(x)= Sum(Wi * Xi) 的margin
-- 2. arr = A * coefficients + arr  获得 prediction value + margins, 计算出关于h(x)的prediction值并加上 margins
-- 3. 依次计算出每个 sample 基于 arr 的 loss, 以及关于 label 的 multiplier
-- 4. 根据 multiplier 计算出梯度.
+- 1 根据 coefficients 计算出 h(x)= Sum(Wi * Xi) 的margin
+- 2 arr = A * coefficients + arr  获得 prediction value + margins, 计算出关于h(x)的prediction值并加上 margins
+- 3 依次计算出每个 sample 基于 arr 的 loss, 以及关于 label 的 multiplier
+- 4 根据 multiplier 计算出梯度.
 
-整个迭待过程如下所示.
+在计算 loss 和 gradient 之前, 会对 sample 进行 scale. 具体是每个 `sample * (inversed std)`
+注: 本例的 samples 只有一个 feature,
 
-在计算 loss 和 gradient 之前, 会对 sample 进行 scale. 具体是每个 sample * (inversed std)
-本例的 samples 只有一个 feature,
-
-```
+``` console
 samples: [46 69 32 60 52 41]
 
 mean = 50
@@ -212,4 +210,112 @@ scaledMean = mean * (inversed std) = 50 * 0.075122 = 3.75611
 samples = samples * (inversed std) = [3.45561995, 5.1834299, 2.4039095, 4.5073303, 3.906353, 3.080009]
 ```
 
-- Iteration 1
+整个迭待过程如下所示.
+
+- **Iteration 1**
+
+initial coefficients = [0, 0]
+
+**Executor side**
+
+``` console
+coefficients = [0, 0]
+scaled samples = [3.45561995, 5.1834299, 2.4039095, 4.5073303, 3.906353, 3.080009]
+
+marginOffset = coefficients.last - coefficientsArray.T*scaledMean = 0 - 0
+H(x) initial margins = [0, 0, 0, 0, 0, 0]
+H(x) margins = initial margins + coefficients*(scaled samples) = [0, 0, 0, 0, 0, 0]
+sum of local loss = Sum( Utils.log1pExp(-margin) or (Utils.log1pExp(-margin) + margin) ) = 4.1588883
+
+multiplier (margin with sigmod(H(x))) = [0.5, -0.5, 0.5, -0.5, -0.5, 0.5]
+multiplierSum = 0
+
+gradients = X.T * multiplier = [-2.328787, 0]
+gradients = gradients + (-multiplierSum)*scaledMean = [-2.328787, 0] if fitWithMean
+gradients[numFeatures] += multiplierSum 
+=> gradients = [-2.328787, 0]
+```
+
+**driver side**
+
+最后得出 loss = sum of local loss / weightedSamples, gradient = gradient / weightedSamples
+
+`coefficients = [0, 0], loss = 4.1588883/6 = 0.6931471805599453, gradient=[−0.388131167, 0]`
+
+生成 State
+``` console
+State {
+  x = coefficients = [0, 0],
+  value = loss = 0.6931471805599453
+  grad = [−0.388131167, 0]
+  adjustedValue = value + regulation = 0.6931471805599453
+  adjustedGradient = grad + regulation' = [−0.388131167, 0]
+  iter = 0 第一轮
+  initialAdjVal = 0.6931471805599453  # 上一轮的 state.value 用于判断是否 converge, 如果是第一轮,则等 于 value
+}
+```
+
+判断是否 converge
+
+- **Iteration 2**
+
+``` console
+在 chooseDescentDirection 找出梯度下降的方向 `state.history * state.grad` 得到 dir=[0.38813122653205856, -0.0]
+在 determineStepSize 根据 dir 中找出下一个 coefficients = (1/Norm(dir)) * dir = (1/|0.388|) * [0.38813122653205856, -0.0] = [0.999999999, 0]
+```
+
+coefficients = [0.999999999, 0]
+
+**Executor side**
+
+``` console
+coefficients = [0.999999999, 0]
+scaled samples = [3.45561995, 5.1834299, 2.4039095, 4.5073303, 3.906353, 3.080009]
+
+marginOffset = coefficients.last - coefficientsArray.T*scaledMean = 0 - 3.7561086
+H(x) initial margins = [-3.7561086, -3.7561086, -3.7561086, -3.7561086, -3.7561086, -3.7561086]
+H(x) margins = initial margins + coefficients*(scaled samples) = [-0.3004887, 1.427321285, -1.352199, 0.75122, 0.150244, -0.6760996]
+sum of local loss = Sum( Utils.log1pExp(-margin) or (Utils.log1pExp(-margin) + margin) ) = 2.4177785
+
+multiplier (margin with sigmod(H(x))) = [0.5, -0.5, 0.5, -0.5, -0.5, 0.5]
+multiplierSum = -0.008499468
+
+gradients = X.T * multiplier = [-1.2520986969938845, 0.0]
+gradients = gradients + (-multiplierSum)*scaledMean = [-1.220173771567439, 0.0] if fitWithMean
+gradients[numFeatures] += multiplierSum 
+=> gradients = [-1.220173771567439, -0.008499468054163961]
+```
+
+**driver side**
+
+最后得出 loss = sum of local loss / weightedSamples, gradient = gradient / weightedSamples
+
+`coefficients = [0.999999999, 0], loss = 2.4177785/6 = 0.4029630838653115, gradient=[-0.20336229526123983,-0.0014165780090273268]`
+
+生成 State
+``` console
+State {
+  x = coefficients = [0.999999999, 0],
+  value = loss = 0.4029630838653115
+  grad = [-0.20336229526123983,-0.0014165780090273268]
+  adjustedValue = value + regulation = 0.4029630838653115
+  adjustedGradient = grad + regulation' = [-0.20336229526123983,-0.0014165780090273268]
+  iter = 1 第一轮
+  initialAdjVal = 0.6931471805599453  # 上一轮的 state.value 用于判断是否 converge, 如果是第一轮,则等 于 value
+}
+```
+
+判断是否 converge
+
+依此类推
+
+- Converge 判断
+
+对于 LBFGS, 默认的收敛条件判断如下所示
+
+``` scala
+maxIterationsReached[T](maxIter) ||  // 是否达到最大迭待次数 与 maxIter 相关
+functionValuesConverged(tolerance, relative, fvalMemory) || // loss 是否没什么变化, 与 tolerance
+gradientConverged[T](tolerance, relative) ||  // 梯度的范数是否足够小, 与 tolerance 相关
+searchFailed //在计算时出错
+```
