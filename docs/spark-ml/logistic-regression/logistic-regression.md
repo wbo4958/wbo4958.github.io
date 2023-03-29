@@ -8,7 +8,7 @@ parent: Spark-ML
 # SparkML LogisticRegression binary classification 算法
 {: .no_toc}
 
-LogisticRegression 是一个分类算法, 可以用于 Binary Regression 和 Multi-classes Regression.
+LogisticRegression 是一个分类算法, 可以用于 Binary Regression 和 Multinomial Regression.
 
 对于 Binary Regression, 主要是
 

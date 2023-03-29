@@ -1,29 +1,17 @@
 ---
 layout: page
-title: LogisticRegression-MultiClassClassification
+title: LogisticRegression Multinomial Classification
 nav_order: 15
 parent: Spark-ML
 ---
 
-# SparkML LogisticRegression multi-class classification 算法
+# SparkML LogisticRegression Multinomial classification 算法
 {: .no_toc}
 
 [Logistic Regression Binary classification](logistic-regression.md) 已经介绍了 LogisticRegression 的
-Binary classification 原理. 而对于 multi-class 分类, 不同在于 loss/gradient 的计算.
+Binary classification 原理. 而对于 Multinomial 分类, 不同在于 loss/gradient 的计算.
 
 对于 multi class classification, 主要是
-
-- 线性方程
-
-![theta](/docs/spark-ml/logistic-regression/thelta_x.png)
-
-- prediction 函数
-
-![sigmod](/docs/spark-ml/logistic-regression/sigmod.png)
-
-那最终的目的是找出所有的 theta, 使得 train samples 的 prediction 与 label 一致.
-
-至于怎么找 theta, 怎么计算, 计算什么 请参考下面的学习笔记. 
 
 ## 目录
 {: .no_toc .text-delta}
@@ -34,170 +22,157 @@ Binary classification 原理. 而对于 multi-class 分类, 不同在于 loss/gr
 ## 测试代码
 
 ``` scala
-val df = Seq(
-      (Vectors.dense(46), 0),
-      (Vectors.dense(69), 1),
-      (Vectors.dense(32), 0),
-      (Vectors.dense(60), 1),
-      (Vectors.dense(52), 1),
-      (Vectors.dense(41), 0)).toDF("value", "label")
+val df = spark.read.schema(
+  "sepal_length float,sepal_width float, petal_length float, petal_width float, label float")
+  .csv("iris-pruned.csv")
+df.show()
 
+val trainDf = new VectorAssembler()
+  .setInputCols(Array("sepal_length", "sepal_width", "petal_length", "petal_width"))
+  .setOutputCol("features").transform(df)
+  .select("features", "label")
 val rf = new LogisticRegression()
-      .setLabelCol("label")
-      .setFeaturesCol("value")
-
-val model = rf.fit(df)
+  .setLabelCol("label")
+  .setFeaturesCol("features")
+val model = rf.fit(trainDf)
+model.transform(trainDf).collect()
 ```
 
-整个训练过程如下所示,
+``` console
++------------+-----------+------------+-----------+-----+
+|sepal_length|sepal_width|petal_length|petal_width|label|
++------------+-----------+------------+-----------+-----+
+|         5.0|        3.5|         1.6|        0.6|  0.0|
+|         5.1|        3.8|         1.9|        0.4|  0.0|
+|         5.6|        2.7|         4.2|        1.3|  1.0|
+|         5.7|        2.8|         4.1|        1.3|  1.0|
+|         6.8|        3.2|         5.9|        2.3|  2.0|
+|         6.5|        3.0|         5.2|        2.0|  2.0|
++------------+-----------+------------+-----------+-----+
+```
 
-![lr-train](/docs/spark-ml/logistic-regression/logistic_regression-flow.drawio.svg)
+本例只选择如上的 iris sample 进行 train, 总共 6 个 sample
 
 ## Train Preparation
 
 ### 计算 Mean/Std/Count
 
-LogisticRegression 首先通过一个 Job 计算出 dataset 中每个 feature 的  Mean/Standard Deviation 以及所有的sample个数.
+Iris 数据集有 4 个 feature, 1 个 label.
 
-计算 std, spark 采用了 [Welford's online algorithm](https://en.m.wikipedia.org/wiki/Algorithms_for_calculating_variance)
-一次性就计算出 mean 和 std.
+``` console
+mean: [5.7833333015441895, 3.166666666666667, 3.816666603088379, 1.3166666477918625]
+std:  [0.7305250054931269, 0.4226897837838385, 1.7359915315704273, 0.7467708078966974]
+```
 
 ### 创建优化器
 
-优化器是对 cost function (objective function) 查找最小值的方法. 一般常用的 [gradient descent](https://en.wikipedia.org/wiki/Gradient_descent) (一阶
-迭待优化算法) 但是 gradient descent 收敛慢. 于是出现了 newton's method, newton's method 收敛更快, 
-但是需要进行大量 Hessian 矩阵计算. 于是出现了 BGFS/LBGFS 是一种类牛顿方法, 但只计算一个和 Hessian 近似的矩阵. 参考[Gradient Descent vs L-BFGS-B](https://gbhat.com/machine_learning/sgd_vs_lbfgsb.html).
-
-同时Spark 对于 L1/L2 采用不同的优化器, 如 BreezeLBFGSB, BreezeLBFGS 和 BreezeOWLQN.
-
-本例中使用的是 BreezeLBFGSB
+与 Binary classification 相同, 对于本例用的是 BreezeLBFGSB
 
 ### 创建初始化的系数.
 
-根据 spark 的注释. 对于 Binary Classification, 当初始化 coefficients = 0 时,收敛更快.
+Binary classification 只有一组 coefficients + intercept, 个数为 number features + 1.
 
-``` 
-P(0) = 1 / (1 + exp(b)), and
-P(1) = exp(b) / (1 + exp(b))
-
-intercept = log{P(1) / P(0)} = log{count_1 / count_0}
-```
+而与 Binary classification 不同, Multinomial classification 中每一个 label 都有一组 `coefficients + intercept`,
+而每一组的 coefficients 的个数等于 features 的个数, 因此 Multinomial 的系数为一个矩阵, shape 为 `(num class) x (num features + 1)`
 
 ## Train
 
-有了上面的准备, 就可以开始 train 了.
-
-LogisticRegression 作为入口函数, 在进入 infinite Iterations 之前先 train 一次 获得初始 State 信息,
-然后进入 iteration. 
-
-每一次 iteration 都会调用 rdd.treeAggregate 计算相应的梯度, loss 等相关信息, 且将计算结果收集回 driver
-端保存在 state 中, 并判断是否收敛.
+Train 的流程与 Binary classification 一样, 只是计算不同.
 
 ### 到底计算什么?
 
-每一次 iteration 其实是一个 Spark Job, 通过 RDD.treeAggregate 计算每个 partition 的 loss sum, 以及 gradient 值.
+Mutlinomial 使用 MultinomialLogisticBlockAggregator 作为 cost function 的实现.
 
-如 RDDLossFunction 所示
+### MultinomialLogisticBlockAggregator
 
-``` scala
-  override def calculate(coefficients: BDV[Double]): (Double, BDV[Double]) = {
-    // cofficients 是上一次 train 出来的系数 vector.
-    val bcCoefficients = instances.context.broadcast(Vectors.fromBreeze(coefficients))
-    val thisAgg = getAggregator(bcCoefficients)
-    val seqOp = (agg: Agg, x: T) => agg.add(x)
-    val combOp = (agg1: Agg, agg2: Agg) => agg1.merge(agg2)
-    val newAgg = instances.treeAggregate(thisAgg)(seqOp, combOp, aggregationDepth)
-
-    // 获得 gradient
-    val gradient = newAgg.gradient
-
-    // regulation loss
-    val regLoss = regularization.map { regFun =>
-      val (regLoss, regGradient) = regFun.calculate(Vectors.fromBreeze(coefficients))
-      BLAS.axpy(1.0, regGradient, gradient)
-      regLoss
-    }.getOrElse(0.0)
-    bcCoefficients.destroy()
-    // 返回 total loss 与 gradient
-    (newAgg.loss + regLoss, gradient.asBreeze.toDenseVector)
-  }
-```
-
-所以可以看出来, treeAggregate 是计算 loss 与 gradient 的.
-
-### BinaryLogisticBlockAggregator
-
-对于 LogisticRegression Binary classification, 采用 BinaryLogisticBlockAggregator aggregator 根据 [loss-function](https://spark.apache.org/docs/latest/mllib-linear-methods.html#loss-functions) 计算
-loss 与 gradient. 
+https://spark.apache.org/docs/3.3.2/ml-classification-regression.html#multinomial-logistic-regression
 
 ``` scala
-  // 处理当前 block
+  // 每次处理一个 block
   def add(block: InstanceBlock): this.type = {
-    // 如果每个 instance 的 weight 为0, 则直接返回
+    // 如果每个 item 的 weight 都为0, 则直接返回
     if (block.weightIter.forall(_ == 0)) return this
-    val size = block.size
+    val size = block.size // 多少个 sample, 本例只有 6 个 sample
 
-    // arr here represents margins
-    // 注意这个 margin 并不是与 label 之间的 margin, 而是 Theta(x)= Sum(Wi * Xi) 的值
-    val arr = Array.ofDim[Double](size)
-    if (fitIntercept) { 
-      // 是否在训练时也训练出 intercept 值
-      // 是否需要 scale, 如果是的, 则 offset= cofficients - cofficients*scaledMean
-      //                如果不是, 则直接返回最后一组 cofficients
-      val offset = if (fitWithMean) marginOffset else coefficientsArray.last
-      java.util.Arrays.fill(arr, offset)
+    // mat/arr here represents margins, shape: S X C 总共 6*3,
+    // mat/arr 表示 theta(x) 的 margin
+    val mat = DenseMatrix.zeros(size, numClasses) //每个 sample 都有 num Class个 margin
+    val arr = mat.values
+    if (fitIntercept) {
+      // 获得 margin
+      val offset = if (fitWithMean) marginOffset else intercept
+      var j = 0
+      while (j < numClasses) {
+        // 初始化 margin. 前面6个是 label0的 margin , 中间6个是 label1 的margin, 后面6个是 label2的 margin
+        if (offset(j) != 0) java.util.Arrays.fill(arr, j * size, (j + 1) * size, offset(j))
+        j += 1
+      }
     }
+    // mat = mat + X*coefficients 即 (6*4) * (4*3) = 每个 sample 分别乘以 每个 label 的 coefficients
+    BLAS.gemm(1.0, block.matrix, linear.transpose, 1.0, mat)
 
-    // arr = A * coefficients + arr  获得 prediction value + margins
-    BLAS.gemv(1.0, block.matrix, coefficientsArray, 1.0, arr)
-
-    // in-place convert margins to multiplier
-    // then, arr represents multiplier
+    // in-place convert margins to multipliers
+    // then, mat/arr represents multipliers
     var localLossSum = 0.0
     var localWeightSum = 0.0
-    var multiplierSum = 0.0
     var i = 0
     while (i < size) {
       val weight = block.getWeight(i)
       localWeightSum += weight
       if (weight > 0) {
-        val label = block.getLabel(i) //真实值
-        val margin = arr(i)
-        if (label > 0) { // 先计算该 instance 的 loss, 最后累加到 localLossSum
-          // The following is equivalent to log(1 + exp(-margin)) but more numerically stable.
-          localLossSum += weight * Utils.log1pExp(-margin)
-        } else {
-          localLossSum += weight * (Utils.log1pExp(-margin) + margin)
-        }
-
-        // multiplier 也是 margin, 只不过是与 label 之间的差距
-        val multiplier = weight * (1.0 / (1.0 + math.exp(-margin)) - label)
-        arr(i) = multiplier // 更新到 arr 中
-        multiplierSum += multiplier
-      } else { arr(i) = 0.0 }
+        val labelIndex = i + block.getLabel(i).toInt * size
+        Utils.softmax(arr, numClasses, i, size, arr) // prob
+        localLossSum -= weight * math.log(arr(labelIndex))
+        if (weight != 1) BLAS.javaBLAS.dscal(numClasses, weight, arr, i, size)
+        arr(labelIndex) -= weight
+      } else {
+        BLAS.javaBLAS.dscal(numClasses, 0, arr, i, size)
+      }
       i += 1
     }
-    lossSum += localLossSum //所有 block 的 loss sum
-    weightSum += localWeightSum  //所有 instance 的 weights
+    lossSum += localLossSum
+    weightSum += localWeightSum
 
-    // predictions are all correct, no gradient signal
-    if (arr.forall(_ == 0)) return this // 如果 margins = 0, 表示 prediction 全正确 
+    // mat (multipliers):             S X C, dense                                N
+    // mat.transpose (multipliers):   C X S, dense                                T
+    // block.matrix (data):           S X F, unknown type                         T
+    // gradSumMat (gradientSumArray): C X FPI (numFeaturesPlusIntercept), dense   N
+    block.matrix match {
+      case dm: DenseMatrix =>
+        // gradientSumArray[0 : F X C] += mat.T X dm
+        BLAS.nativeBLAS.dgemm("T", "T", numClasses, numFeatures, size, 1.0,
+          mat.values, size, dm.values, numFeatures, 1.0, gradientSumArray, numClasses)
 
-    // update the linear part of gradientSumArray
-    // A * multiplier 表示当前 block 的梯度.
-    // gradientSumArray = gradientSumArray + A * multiplier 累加所有 block 的梯度
-    BLAS.gemv(1.0, block.matrix.transpose, arr, 1.0, gradientSumArray)
-
-    if (fitWithMean) {
-      // above update of the linear part of gradientSumArray does NOT take the centering
-      // into account, here we need to adjust this part.
-      BLAS.javaBLAS.daxpy(numFeatures, -multiplierSum, bcScaledMean.value, 1,
-        gradientSumArray, 1)
+      case sm: SparseMatrix =>
+        // TODO: convert Coefficients to row major order to simplify BLAS operations?
+        // linearGradSumMat = sm.T X mat
+        // existing BLAS.gemm requires linearGradSumMat is NOT Transposed.
+        val linearGradSumMat = DenseMatrix.zeros(numFeatures, numClasses)
+        BLAS.gemm(1.0, sm.transpose, mat, 0.0, linearGradSumMat)
+        linearGradSumMat.foreachActive { (i, j, v) => gradientSumArray(i * numClasses + j) += v }
     }
 
     if (fitIntercept) {
-      // update the intercept part of gradientSumArray
-      gradientSumArray(numFeatures) += multiplierSum
+      val multiplierSum = Array.ofDim[Double](numClasses)
+      var j = 0
+      while (j < numClasses) {
+        var i = j * size
+        val end = i + size
+        while (i < end) { multiplierSum(j) += arr(i); i += 1 }
+        j += 1
+      }
+
+      if (fitWithMean) {
+        // above update of the linear part of gradientSumArray does NOT take the centering
+        // into account, here we need to adjust this part.
+        // following BLAS.dger operation equals to: gradientSumArray[0 : F X C] -= mat.T X _mm_,
+        // where _mm_ is a matrix of size S X F with each row equals to array ScaledMean.
+        BLAS.nativeBLAS.dger(numClasses, numFeatures, -1.0, multiplierSum, 1,
+          bcScaledMean.value, 1, gradientSumArray, numClasses)
+      }
+
+      BLAS.javaBLAS.daxpy(numClasses, 1.0, multiplierSum, 0, 1,
+        gradientSumArray, numClasses * numFeatures, 1)
     }
 
     this
