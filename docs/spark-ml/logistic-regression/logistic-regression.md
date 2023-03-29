@@ -1,11 +1,11 @@
 ---
 layout: page
-title: LogisticRegression
+title: LogisticRegression-BinaryClassification
 nav_order: 10
 parent: Spark-ML
 ---
 
-# Spark ML LogisticRegression 算法
+# SparkML LogisticRegression binary classification 算法
 {: .no_toc}
 
 LogisticRegression 是一个分类算法, 可以用于 Binary Regression 和 Multi-classes Regression.
