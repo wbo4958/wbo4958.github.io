@@ -1,14 +1,28 @@
 ---
 layout: page
-title: LogisticRegression
+title: LogisticRegression-BinaryClassification
 nav_order: 10
 parent: Spark-ML
 ---
 
-# Spark ML LogisticRegression 算法
+# SparkML LogisticRegression binary classification 算法
 {: .no_toc}
 
 LogisticRegression 是一个分类算法, 可以用于 Binary Regression 和 Multi-classes Regression.
+
+对于 Binary Regression, 主要是
+
+- 线性方程
+
+![theta](/docs/spark-ml/logistic-regression/thelta_x.png)
+
+- prediction 函数
+
+![sigmod](/docs/spark-ml/logistic-regression/sigmod.png)
+
+那最终的目的是找出所有的 theta, 使得 train samples 的 prediction 与 label 一致.
+
+至于怎么找 theta, 怎么计算, 计算什么 请参考下面的学习笔记. 
 
 ## 目录
 {: .no_toc .text-delta}
@@ -123,7 +137,7 @@ loss 与 gradient.
     val size = block.size
 
     // arr here represents margins
-    // 注意这个 margin 并不是与 label 之间的 margin, 而是 h(x)= Sum(Wi * Xi) 的值
+    // 注意这个 margin 并不是与 label 之间的 margin, 而是 Theta(x)= Sum(Wi * Xi) 的值
     val arr = Array.ofDim[Double](size)
     if (fitIntercept) { 
       // 是否在训练时也训练出 intercept 值
@@ -191,8 +205,8 @@ loss 与 gradient.
 
 上面的过程很简单,
 
-- 1 根据 coefficients 计算出 h(x)= Sum(Wi * Xi) 的margin
-- 2 arr = A * coefficients + arr  获得 prediction value + margins, 计算出关于h(x)的prediction值并加上 margins
+- 1 根据 coefficients 计算出 Theta(x)= Sum(Wi * Xi) 的margin
+- 2 arr = A * coefficients + arr  获得 Theta 函数 prediction value + margins, 计算出关于Theta(x)的prediction值并加上 margins
 - 3 依次计算出每个 sample 基于 arr 的 loss, 以及关于 label 的 multiplier
 - 4 根据 multiplier 计算出梯度.
 
@@ -223,11 +237,11 @@ coefficients = [0, 0]
 scaled samples = [3.45561995, 5.1834299, 2.4039095, 4.5073303, 3.906353, 3.080009]
 
 marginOffset = coefficients.last - coefficientsArray.T*scaledMean = 0 - 0
-H(x) initial margins = [0, 0, 0, 0, 0, 0]
-H(x) margins = initial margins + coefficients*(scaled samples) = [0, 0, 0, 0, 0, 0]
+Theta(x) initial margins = [0, 0, 0, 0, 0, 0]
+Theta(x) margins = initial margins + coefficients*(scaled samples) = [0, 0, 0, 0, 0, 0]
 sum of local loss = Sum( Utils.log1pExp(-margin) or (Utils.log1pExp(-margin) + margin) ) = 4.1588883
 
-multiplier (margin with sigmod(H(x))) = [0.5, -0.5, 0.5, -0.5, -0.5, 0.5]
+multiplier (margin with H_theta(Theta(x))) = [0.5, -0.5, 0.5, -0.5, -0.5, 0.5]
 multiplierSum = 0
 
 gradients = X.T * multiplier = [-2.328787, 0]
@@ -273,11 +287,11 @@ coefficients = [0.999999999, 0]
 scaled samples = [3.45561995, 5.1834299, 2.4039095, 4.5073303, 3.906353, 3.080009]
 
 marginOffset = coefficients.last - coefficientsArray.T*scaledMean = 0 - 3.7561086
-H(x) initial margins = [-3.7561086, -3.7561086, -3.7561086, -3.7561086, -3.7561086, -3.7561086]
-H(x) margins = initial margins + coefficients*(scaled samples) = [-0.3004887, 1.427321285, -1.352199, 0.75122, 0.150244, -0.6760996]
+Theta(x) initial margins = [-3.7561086, -3.7561086, -3.7561086, -3.7561086, -3.7561086, -3.7561086]
+Theta(x) margins = initial margins + coefficients*(scaled samples) = [-0.3004887, 1.427321285, -1.352199, 0.75122, 0.150244, -0.6760996]
 sum of local loss = Sum( Utils.log1pExp(-margin) or (Utils.log1pExp(-margin) + margin) ) = 2.4177785
 
-multiplier (margin with sigmod(H(x))) = [0.5, -0.5, 0.5, -0.5, -0.5, 0.5]
+multiplier (margin with H_theta(Theta(x))) = [0.5, -0.5, 0.5, -0.5, -0.5, 0.5]
 multiplierSum = -0.008499468
 
 gradients = X.T * multiplier = [-1.2520986969938845, 0.0]
@@ -319,3 +333,62 @@ functionValuesConverged(tolerance, relative, fvalMemory) || // loss 是否没什
 gradientConverged[T](tolerance, relative) ||  // 梯度的范数是否足够小, 与 tolerance 相关
 searchFailed //在计算时出错
 ```
+
+## Model
+
+经过上面的计算, 最终获得的 Theta 也就是 coefficients 和 intercept 分别为 
+
+``` console
+coefficients = [5.511520037332782] # 本例中只有一个 feature, 因此只有一个 theta
+intercept = -270.3529400636783
+```
+
+并创建 LogisticRegressionModel, 其中会初始化下面两个变量用于 prediction.
+
+``` scala
+  /** Margin (rawPrediction) for class label 1.  For binary classification only. */
+  private val margin: Vector => Double = (features) => {
+    BLAS.dot(features, _coefficients) + _intercept
+  }
+
+  /** Score (probability) for class label 1.  For binary classification only. */
+  private val score: Vector => Double = (features) => {
+    val m = margin(features)
+    1.0 / (1.0 + math.exp(-m))
+  }
+```
+
+margin 函数用于求得 theta(x) 的值, score 函数用于获得最终的 sigmod(theta(x)) 的 prediction 值 (0, 1)
+
+
+### predict
+
+``` scala
+  override def predict(features: Vector): Double = if (isMultinomial) {
+    super.predict(features)
+  } else {
+    // Note: We should use _threshold instead of $(threshold) since getThreshold is overridden.
+    if (score(features) > _threshold) 1 else 0 # _threshold 默认为0, 如果 sigmod 值 > 0, 则 predict 出来为 1
+  }
+```
+
+### predictRaw
+
+``` scala
+  override def predictRaw(features: Vector): Vector = {
+    if (isMultinomial) {
+      margins(features)
+    } else {
+      val m = margin(features)
+      Vectors.dense(-m, m)
+    }
+  }
+```
+
+predictRaw 获得 theta(x) 的值.
+
+## 参考
+- [LogisticRegression](https://github.com/endymecy/spark-ml-source-analysis/blob/master/%E5%88%86%E7%B1%BB%E5%92%8C%E5%9B%9E%E5%BD%92/%E7%BA%BF%E6%80%A7%E6%A8%A1%E5%9E%8B/%E9%80%BB%E8%BE%91%E5%9B%9E%E5%BD%92/logic-regression.md)
+- [spark logistic regression](https://spark.apache.org/docs/latest/mllib-linear-methods.html#logistic-regression)
+- [loss function](https://spark.apache.org/docs/latest/mllib-linear-methods.html#loss-functions)
+- [How to Calculate Standard Deviation](https://www.scribbr.com/statistics/standard-deviation/)
