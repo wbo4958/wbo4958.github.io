@@ -13,6 +13,22 @@ Binary classification 原理. 而对于 Multinomial 分类, 不同在于 loss/gr
 
 对于 multi class classification, 主要是
 
+- 线性方程
+
+![theta](/docs/spark-ml/logistic-regression/thelta_x.png)
+
+- prediction 函数 (softmax)
+
+![softmax](/docs/spark-ml/logistic-regression/softmax.svg)
+
+- loss function
+
+![loss](/docs/spark-ml/logistic-regression/loss.svg)
+
+参考 [softmax loss gradient](http://bigstuffgoingon.com/blog/posts/softmax-loss-gradient/) [一文详解Softmax函数
+](https://zhuanlan.zhihu.com/p/105722023)
+
+
 ## 目录
 {: .no_toc .text-delta}
 
@@ -121,7 +137,11 @@ https://spark.apache.org/docs/3.3.2/ml-classification-regression.html#multinomia
       localWeightSum += weight
       if (weight > 0) {
         val labelIndex = i + block.getLabel(i).toInt * size
+
+        //计算出 prediction
         Utils.softmax(arr, numClasses, i, size, arr) // prob
+
+        // 计算出 loss
         localLossSum -= weight * math.log(arr(labelIndex))
         if (weight != 1) BLAS.javaBLAS.dscal(numClasses, weight, arr, i, size)
         arr(labelIndex) -= weight
@@ -138,6 +158,7 @@ https://spark.apache.org/docs/3.3.2/ml-classification-regression.html#multinomia
     // block.matrix (data):           S X F, unknown type                         T
     // gradSumMat (gradientSumArray): C X FPI (numFeaturesPlusIntercept), dense   N
     block.matrix match {
+      // 计算梯度
       case dm: DenseMatrix =>
         // gradientSumArray[0 : F X C] += mat.T X dm
         BLAS.nativeBLAS.dgemm("T", "T", numClasses, numFeatures, size, 1.0,
@@ -179,174 +200,65 @@ https://spark.apache.org/docs/3.3.2/ml-classification-regression.html#multinomia
   }
 ```
 
-上面的过程很简单,
-
-- 1 根据 coefficients 计算出 Theta(x)= Sum(Wi * Xi) 的margin
-- 2 arr = A * coefficients + arr  获得 Theta 函数 prediction value + margins, 计算出关于Theta(x)的prediction值并加上 margins
-- 3 依次计算出每个 sample 基于 arr 的 loss, 以及关于 label 的 multiplier
-- 4 根据 multiplier 计算出梯度.
-
 在计算 loss 和 gradient 之前, 会对 sample 进行 scale. 具体是每个 `sample * (inversed std)`
 注: 本例的 samples 只有一个 feature,
 
 ``` console
-samples: [46 69 32 60 52 41]
+samples: 
+5.0, 3.5, 1.6, 0.6
+5.1, 3.8, 1.9, 0.4
+5.6, 2.7, 4.2, 1.3
+5.7, 2.8, 4.1, 1.3
+6.8, 3.2, 5.9, 2.3
+6.5, 3.0, 5.2, 2.0
 
-mean = 50
-std = 13.311649
-inversed std = 1/13.311649 = 0.075122
-scaledMean = mean * (inversed std) = 50 * 0.075122 = 3.75611
+mean: [5.7833333015441895, 3.166666666666667, 3.816666603088379, 1.3166666477918625]
+std:  [0.7305250054931269, 0.4226897837838385, 1.7359915315704273, 0.7467708078966974]
 
-samples = samples * (inversed std) = [3.45561995, 5.1834299, 2.4039095, 4.5073303, 3.906353, 3.080009]
+inversed std = [1.3688785359578064, 2.3658012054329545, 0.5760396763545106, 1.339098943645816]
+scaledMean = mean * (inversed std) = [7.916680822773837, 7.491703817204357, 2.198551394796099, 1.7631469171917609]
+
+samples = samples * (inversed std) = 
+6.844392679789032   8.28030421901534   0.9216634959010731  0.8034593981140964  
+6.981280402838382   8.990044467835034  1.094475371339714   0.5356395854399781  
+7.6657196708172854  6.38766336747917   2.4193665308180954  1.7408285628863474  
+7.802607393866636   6.62424326240208   2.361762618118069   1.7408285628863474  
+9.308374305605945   7.570563970195646  3.398634145427037   3.0799275065321634  
+8.897710483725742   7.097403616298863  2.995406207172606   2.678197887291632
 ```
 
-整个迭待过程如下所示.
-
-- **Iteration 1**
-
-initial coefficients = [0, 0]
-
-**Executor side**
-
-``` console
-coefficients = [0, 0]
-scaled samples = [3.45561995, 5.1834299, 2.4039095, 4.5073303, 3.906353, 3.080009]
-
-marginOffset = coefficients.last - coefficientsArray.T*scaledMean = 0 - 0
-Theta(x) initial margins = [0, 0, 0, 0, 0, 0]
-Theta(x) margins = initial margins + coefficients*(scaled samples) = [0, 0, 0, 0, 0, 0]
-sum of local loss = Sum( Utils.log1pExp(-margin) or (Utils.log1pExp(-margin) + margin) ) = 4.1588883
-
-multiplier (margin with H_theta(Theta(x))) = [0.5, -0.5, 0.5, -0.5, -0.5, 0.5]
-multiplierSum = 0
-
-gradients = X.T * multiplier = [-2.328787, 0]
-gradients = gradients + (-multiplierSum)*scaledMean = [-2.328787, 0] if fitWithMean
-gradients[numFeatures] += multiplierSum 
-=> gradients = [-2.328787, 0]
-```
-
-**driver side**
-
-最后得出 loss = sum of local loss / weightedSamples, gradient = gradient / weightedSamples
-
-`coefficients = [0, 0], loss = 4.1588883/6 = 0.6931471805599453, gradient=[−0.388131167, 0]`
-
-生成 State
-``` console
-State {
-  x = coefficients = [0, 0],
-  value = loss = 0.6931471805599453
-  grad = [−0.388131167, 0]
-  adjustedValue = value + regulation = 0.6931471805599453
-  adjustedGradient = grad + regulation' = [−0.388131167, 0]
-  iter = 0 第一轮
-  initialAdjVal = 0.6931471805599453  # 上一轮的 state.value 用于判断是否 converge, 如果是第一轮,则等 于 value
-}
-```
-
-判断是否 converge
-
-- **Iteration 2**
-
-``` console
-在 chooseDescentDirection 找出梯度下降的方向 `state.history * state.grad` 得到 dir=[0.38813122653205856, -0.0]
-在 determineStepSize 根据 dir 中找出下一个 coefficients = (1/Norm(dir)) * dir = (1/|0.388|) * [0.38813122653205856, -0.0] = [0.999999999, 0]
-```
-
-coefficients = [0.999999999, 0]
-
-**Executor side**
-
-``` console
-coefficients = [0.999999999, 0]
-scaled samples = [3.45561995, 5.1834299, 2.4039095, 4.5073303, 3.906353, 3.080009]
-
-marginOffset = coefficients.last - coefficientsArray.T*scaledMean = 0 - 3.7561086
-Theta(x) initial margins = [-3.7561086, -3.7561086, -3.7561086, -3.7561086, -3.7561086, -3.7561086]
-Theta(x) margins = initial margins + coefficients*(scaled samples) = [-0.3004887, 1.427321285, -1.352199, 0.75122, 0.150244, -0.6760996]
-sum of local loss = Sum( Utils.log1pExp(-margin) or (Utils.log1pExp(-margin) + margin) ) = 2.4177785
-
-multiplier (margin with H_theta(Theta(x))) = [0.5, -0.5, 0.5, -0.5, -0.5, 0.5]
-multiplierSum = -0.008499468
-
-gradients = X.T * multiplier = [-1.2520986969938845, 0.0]
-gradients = gradients + (-multiplierSum)*scaledMean = [-1.220173771567439, 0.0] if fitWithMean
-gradients[numFeatures] += multiplierSum 
-=> gradients = [-1.220173771567439, -0.008499468054163961]
-```
-
-**driver side**
-
-最后得出 loss = sum of local loss / weightedSamples, gradient = gradient / weightedSamples
-
-`coefficients = [0.999999999, 0], loss = 2.4177785/6 = 0.4029630838653115, gradient=[-0.20336229526123983,-0.0014165780090273268]`
-
-生成 State
-``` console
-State {
-  x = coefficients = [0.999999999, 0],
-  value = loss = 0.4029630838653115
-  grad = [-0.20336229526123983,-0.0014165780090273268]
-  adjustedValue = value + regulation = 0.4029630838653115
-  adjustedGradient = grad + regulation' = [-0.20336229526123983,-0.0014165780090273268]
-  iter = 1 第一轮
-  initialAdjVal = 0.6931471805599453  # 上一轮的 state.value 用于判断是否 converge, 如果是第一轮,则等 于 value
-}
-```
-
-判断是否 converge
-
-依此类推
-
-- Converge 判断
-
-对于 LBFGS, 默认的收敛条件判断如下所示
-
-``` scala
-maxIterationsReached[T](maxIter) ||  // 是否达到最大迭待次数 与 maxIter 相关
-functionValuesConverged(tolerance, relative, fvalMemory) || // loss 是否没什么变化, 与 tolerance
-gradientConverged[T](tolerance, relative) ||  // 梯度的范数是否足够小, 与 tolerance 相关
-searchFailed //在计算时出错
-```
+整个迭待过程与 LogisticRegression Binary classification 类似.
 
 ## Model
 
 经过上面的计算, 最终获得的 Theta 也就是 coefficients 和 intercept 分别为 
 
+- coefficient
+
 ``` console
-coefficients = [5.511520037332782] # 本例中只有一个 feature, 因此只有一个 theta
-intercept = -270.3529400636783
+-4.125986206819423  15.652431537565903  -3.0244748666738954  -3.695660456730089  
+-7.369270983747656  -28.21306513402949  0.7202419665333993   -5.540050255560649  
+11.495257190567079  12.560633596463585  2.304232900140496    9.235710712290738 
+```
+
+- intercept
+
+```
+[-9.364161124333789, 137.13105330440678, -127.76689218007299]
 ```
 
 并创建 LogisticRegressionModel, 其中会初始化下面两个变量用于 prediction.
 
 ``` scala
-  /** Margin (rawPrediction) for class label 1.  For binary classification only. */
-  private val margin: Vector => Double = (features) => {
-    BLAS.dot(features, _coefficients) + _intercept
-  }
-
-  /** Score (probability) for class label 1.  For binary classification only. */
-  private val score: Vector => Double = (features) => {
-    val m = margin(features)
-    1.0 / (1.0 + math.exp(-m))
+  /** Margin (rawPrediction) for each class label. */
+  private val margins: Vector => Vector = (features) => {
+    val m = _interceptVector.copy
+    BLAS.gemv(1.0, coefficientMatrix, features, 1.0, m)
+    m
   }
 ```
 
-margin 函数用于求得 theta(x) 的值, score 函数用于获得最终的 sigmod(theta(x)) 的 prediction 值 (0, 1)
-
-
-### predict
-
-``` scala
-  override def predict(features: Vector): Double = if (isMultinomial) {
-    super.predict(features)
-  } else {
-    // Note: We should use _threshold instead of $(threshold) since getThreshold is overridden.
-    if (score(features) > _threshold) 1 else 0 # _threshold 默认为0, 如果 sigmod 值 > 0, 则 predict 出来为 1
-  }
-```
+margins 函数用于求得 theta(x)*coefficients + intercept 的值
 
 ### predictRaw
 
@@ -355,16 +267,27 @@ margin 函数用于求得 theta(x) 的值, score 函数用于获得最终的 sig
     if (isMultinomial) {
       margins(features)
     } else {
-      val m = margin(features)
-      Vectors.dense(-m, m)
+      ...
     }
   }
 ```
 
-predictRaw 获得 theta(x) 的值.
+求得 intercept + Coefficients * Input 作为 Raw value.
 
-## 参考
-- [LogisticRegression](https://github.com/endymecy/spark-ml-source-analysis/blob/master/%E5%88%86%E7%B1%BB%E5%92%8C%E5%9B%9E%E5%BD%92/%E7%BA%BF%E6%80%A7%E6%A8%A1%E5%9E%8B/%E9%80%BB%E8%BE%91%E5%9B%9E%E5%BD%92/logic-regression.md)
-- [spark logistic regression](https://spark.apache.org/docs/latest/mllib-linear-methods.html#logistic-regression)
-- [loss function](https://spark.apache.org/docs/latest/mllib-linear-methods.html#loss-functions)
-- [How to Calculate Standard Deviation](https://www.scribbr.com/statistics/standard-deviation/)
+predictRaw 获得 Theta(x) 的值.
+
+### predictProbability
+
+首先 predict raw value, 然后通过 softmax 算得每个 label 的概率
+
+### predict
+
+``` scala
+  override def predict(features: Vector): Double = if (isMultinomial) {
+    super.predict(features)
+  } else {
+    ...
+  }
+```
+
+首先 predict raw value, 然后找到最大值时 label value.
