@@ -1,9 +1,9 @@
 ---
 layout: page
 title: aggregate/treeAggregate
-nav_order:  10000000
-parent: RDD 
-grand_parent: Spark
+nav_order:  2
+parent: rdd 
+grand_parent: spark
 ---
 
 # Spark RDD aggregate/treeAggregate
