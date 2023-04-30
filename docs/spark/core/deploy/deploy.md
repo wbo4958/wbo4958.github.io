@@ -21,7 +21,7 @@ grand_parent: spark
 
 下面这张图是从[spark官网](https://spark.apache.org/docs/latest/cluster-overview.html)获得
 
-![cluster overview](/docs/spark/spark-core/deploy/cluster-overview.png)
+![cluster overview](/docs/spark/core/deploy/cluster-overview.png)
 
 Spark applications run as independent sets of processes on a cluster, coordinated by the SparkContext object in your main program (called the driver program).
 
@@ -35,7 +35,7 @@ Specifically, to run on a cluster, the SparkContext can connect to several types
 
 Spark 的 Deploy 过程如图所示
 
-![standalone-deploy](/docs/spark/spark-core/deploy/standalone-deploy.drawio.svg)
+![standalone-deploy](/docs/spark/core/deploy/standalone-deploy.drawio.svg)
 
 ## Deploy涉及到的的组件
 

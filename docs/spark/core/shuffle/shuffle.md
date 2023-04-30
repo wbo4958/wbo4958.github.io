@@ -25,7 +25,7 @@ df1.show()
 
 ## Shuffle 过程
 
-![shuffle](/docs/spark/shuffle/shuffle-shuffle.svg)
+![shuffle](/docs/spark/core/shuffle/shuffle-shuffle.svg)
 
 DAG 划分 Stages 的判断条件是 ShuffleDependency. 将 ShuffeleDependency 自带的 rdd chain 划分为 ShuffleStage.
 
@@ -53,11 +53,11 @@ ShuffleDependency 类中保存了很多在 shuffle write/read 过程中需要用
 
 在 shuffle write 之前, ShuffleExchangeExec 内部可能会添加 MapPartitionsRDD - 比如为 repartition 添加 sort.
 
-![shuffle-write-rdd](/docs/spark/shuffle/shuffle-rdd-write.svg)
+![shuffle-write-rdd](/docs/spark/core/shuffle/shuffle-rdd-write.svg)
 
 Shuffle write 按照 partitioning 将数据进行分区.
 
-![partitioning](/docs/spark/shuffle/shuffle-Partitioning.svg)
+![partitioning](/docs/spark/core/shuffle/shuffle-Partitioning.svg)
 
 并且在最后会添加一个 MapPartitionsRDD 根据 Partitioning 将数据变成 `Iterator(partitionId, internalRow)` 格式.
 
@@ -65,20 +65,20 @@ Shuffle write 按照 partitioning 将数据进行分区.
 
 - UnsafeShuffleWriter
 
-  ![UnsafeShuffleWriter](/docs/spark/shuffle/shuffle-UnsafeShuffleWriter.svg)
+  ![UnsafeShuffleWriter](/docs/spark/core/shuffle/shuffle-UnsafeShuffleWriter.svg)
 
   UnsafeShuffleWriter 利用 Unsafe 的接口将数据存储到 MemoryBlock (具体是 ON_HEAP 还是 OFF_HEAP 由 `spark.memory.offHeap.enabled` 控制). 另外将数据的保存地址与reducer的partitionID pack 成一个 long 型数据保存到 ShuffleInMemorySorter.
 当有 spill 发生时, ShuffleInMemorySorter 先将保存的地址按照 partitionID 进行排序, 此目的是将相同 reducer partitionID的数据放在一起, 最后 spill 时根据排序好的地址获得最终的数据并写入到 shuffle 文件中 (数据落盘), 并返回 Spill 信息(shuffle 文件名, 每个 reducer partition 的数据长度及其它)
 
 - SortShuffleWriter
 
-  ![SortShuffleWriter](/docs/spark/shuffle/shuffle-SortShuffleWriter.svg)
+  ![SortShuffleWriter](/docs/spark/core/shuffle/shuffle-SortShuffleWriter.svg)
 
   SortShuffleWriter 先对相同的 (partition, key) 进行 merge 和 sort, 这样可以保证同一个 partition 中的数据放在一起, 然后对数据进行磁盘落地.
 
 - BypassMergeSortShuffleWriter (default)
 
-  ![BypassMergeSortShuffleWriter](/docs/spark/shuffle/shuffle-BypassMergeSortShuffleWriter.svg)
+  ![BypassMergeSortShuffleWriter](/docs/spark/core/shuffle/shuffle-BypassMergeSortShuffleWriter.svg)
 
   BypassMergeSortShuffleWriter 在 shuffle write的时候 Bypass sort merge 相关操作, BypassMergeSortShuffleWriter 创建多个 (reducer partition个数) shuffle 临时文件, 然后将数据分别写入到这些shuffle 临时文件中, 最后合并成一个大的 shuffle data 文件, 以及 shuffle index.
 

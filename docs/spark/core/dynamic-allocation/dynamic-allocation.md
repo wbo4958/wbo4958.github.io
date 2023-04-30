@@ -95,7 +95,7 @@ val appDesc = ApplicationDescription(sc.appName, maxCores, command,
 
 ## Overview
 
-![flowchart](/docs/spark/spark-core/dynamic-allocation/dynamic-allocation-flow.drawio.svg)
+![flowchart](/docs/spark/core/dynamic-allocation/dynamic-allocation-flow.drawio.svg)
 
 
 默认 initialNumExecutors = 0

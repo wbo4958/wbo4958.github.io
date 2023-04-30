@@ -28,7 +28,7 @@ def submitJob[T, U](
     partitions: Seq[Int], // RDD 里需要计算的 partition 集合
     callSite: CallSite,
     resultHandler: (Int, U) => Unit, // 更新对应 partition 的计算结果
-    properties: Properties): JobWaiter[U] = {
+    properties: Properties): JobWaiter[U] = {...}
 ```
 
 从 submitJob 的参数来看, Spark Scheduler 对用户是不可见的. 用户只关心将 job 提交给 Spark 后能得到正确的结果,且 performance 要好.
@@ -37,7 +37,7 @@ def submitJob[T, U](
 
 下面这张图基本上描述了 Spark 怎么样调度一个 Task.
 
-![spark schedule](/docs/spark/spark-core/schedule/dag-schedule.drawio.svg)
+![spark schedule](/docs/spark/core/schedule/dag-schedule.drawio.svg)
 
 上图涉及到很多类,
 
@@ -63,15 +63,15 @@ def submitJob[T, U](
 
 上图中绿色的框表示在 Job/Stage/Task 的创建时机, 他们的关系图所下所示
 
-![dag-entity](/docs/spark/spark-core/schedule/dag-ActiveJob.drawio.svg)
+![dag-entity](/docs/spark/core/schedule/dag-ActiveJob.drawio.svg)
 
 下图是描述 Task success 的流程图
 
-![task success](/docs/spark/spark-core/schedule/dag-Task_Success.drawio.svg)
+![task success](/docs/spark/core/schedule/dag-Task_Success.drawio.svg)
 
 而下图描述 Task failure 的流程图
 
-![task failure](/docs/spark/spark-core/schedule/dag-Task_Failed.drawio.svg)
+![task failure](/docs/spark/core/schedule/dag-Task_Failed.drawio.svg)
 
 当一个 Task 失败时会重新调度该 Task, 而当该 Task 失败的次数大于 `spark.task.maxFailures` 时, 会直接停掉 Task 对应的 Stage, 进而结束掉整个 Job.
 
@@ -94,7 +94,7 @@ def submitJob[T, U](
 
 SparkContext 初始化完成后, Application 开始向 Spark DAG 提交 job. 假设如下所示,
 
-![DAG demo1](/docs/spark/spark-core/schedule/dag-demo-0.drawio.svg)
+![DAG demo1](/docs/spark/core/schedule/dag-demo-0.drawio.svg)
 
 整个调度过程如下所示,
 
@@ -142,7 +142,7 @@ SparkContext 初始化完成后, Application 开始向 Spark DAG 提交 job. 假
 
 ### 调度 child stage
 
-![demo-1](/docs/spark/spark-core/schedule/dag-demo-1.drawio.svg)
+![demo-1](/docs/spark/core/schedule/dag-demo-1.drawio.svg)
 
 1. 假设 ShuffleStage_0 中最后一个 task 执行完并返回.
 2. 标记 ShuffleStage_0 finished. 从 Pool 中移除掉 TaskSetManager_0
@@ -154,7 +154,7 @@ SparkContext 初始化完成后, Application 开始向 Spark DAG 提交 job. 假
 
 ### 调度 final stage
 
-![demo-2](/docs/spark/spark-core/schedule/dag-demo-2.drawio.svg)
+![demo-2](/docs/spark/core/schedule/dag-demo-2.drawio.svg)
 
 - ShuffleStage_1 所有的 Task 执行完成并返回后.
 - 标记 ShuffleStage_1 finished. 从 Pool 中移除掉 TaskSetManager_1
