@@ -1,9 +1,9 @@
 ---
 layout: page
-title: array
-nav_order: 5
-parent: Sql functions
-grand_parent: Spark
+title: func-array
+nav_order: 10000
+parent: sql
+grand_parent: spark
 ---
 
 # array
@@ -23,7 +23,7 @@ array 的数据类型
 
 Spark 底层使用 ArrayData 表示一个 array. ArrayData 有三个子类分别为
 
-![functions](/docs/spark/sql-functions/array/functions.svg)
+![functions](/docs/spark/sql/functions/array/functions.svg)
 
 - GenericArrayData 数据保存在 JVM 堆中
 - UnsafeArrayData 数据保存在 Unsafe Memory 非 JVM 堆
@@ -152,7 +152,7 @@ Spark 底层使用 ArrayData 表示一个 array. ArrayData 有三个子类分别
   }
   ```
 
-  references[0] 是传入的需要比较的数组 Array(9). compareArray_0 函数请参考 [genComp](/docs/spark/codegen/codegen-context/codegencontext2.html#gencomp)
+  references[0] 是传入的需要比较的数组 Array(9). compareArray_0 函数请参考 [genComp](/docs/spark/sql/codegen/codegen-context/codegencontext2.html#gencomp)
 
 ### array_max/array_min
 

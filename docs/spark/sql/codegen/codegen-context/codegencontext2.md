@@ -1,9 +1,9 @@
 ---
 layout: page
 title: CodegenContext相关函数
-nav_order: 10
-parent: Codegen
-grand_parent: Spark
+nav_order: 5001
+parent: sql
+grand_parent: spark
 ---
 
 # Spark CodeGen Context 辅助函数

@@ -1,9 +1,9 @@
 ---
 layout: page
 title: Attribute
-nav_order: 5
-parent: Expression
-grand_parent: Spark
+nav_order: 1000
+parent: sql
+grand_parent: spark
 ---
 
 # Attribute
@@ -167,7 +167,7 @@ protected[sql] def toAttributes: Seq[AttributeReference] =
 
     LogicalRelation 是一个 LeafNode, 它没有输入, LogicalRelation 表示的是底层数据信息, 它的 `output: Seq[AttributeReference]` 已经引用到了数据的 field.
 
-    ![logical relation](/docs/spark/expression/attribute/expression-logicalrelation.svg)
+    ![logical relation](/docs/spark/sql/expression/attribute/expression-logicalrelation.svg)
 
 2. 创建 UnresolvedAttribute
 
@@ -208,7 +208,7 @@ protected[sql] def toAttributes: Seq[AttributeReference] =
 
     此时还没有对 LogicalPlan 进行解析, 所以 spark 并不知道关于 "name" 列的任何信息(数据类型,nullable等),以及 "name" 是否有效也不知道. 当通过 `untypedCols.map(_.named)` 把 Column 转换为 Project 的 projectList 时, 依然是 UnresolvedAttribute , 只不过多加了一个 UnresovedAlias.
 
-    ![project](/docs/spark/expression/attribute/expression-project.svg)
+    ![project](/docs/spark/sql/expression/attribute/expression-project.svg)
 
 3. 解析 UnresolvedAttribute
 
@@ -273,7 +273,7 @@ protected[sql] def toAttributes: Seq[AttributeReference] =
 
    最终的 LogicalPlan 如下
 
-   ![final logical plan](/docs/spark/expression/attribute/expression-project-resolved.svg)
+   ![final logical plan](/docs/spark/sql/expression/attribute/expression-project-resolved.svg)
 
 4. BoundReference
 

@@ -1,9 +1,9 @@
 ---
 layout: page
 title: Codegen工具类
-nav_order: 15
-parent: Codegen
-grand_parent: Spark
+nav_order: 5002
+parent: sql
+grand_parent: spark
 ---
 
 # Spark codegen 工具类
@@ -21,7 +21,7 @@ grand_parent: Spark
 
 CodeGenerator 是一个抽象类，它主要是用来根据输入的 expression 生成代码用于表达式计算.
 
-![](/docs/spark/codegen/codegen-context/codegen-codegenerator.svg)
+![](/docs/spark/sql/codegen/codegen-context/codegen-codegenerator.svg)
 
 其中
 
@@ -52,7 +52,7 @@ val ordering = RowOrdering.create(order, input)
 
 RowOrdering.create 最终调用到 GenerateOrdering.generate 函数生成一个 BaseOrdering的子类. GenerateOrdering 用于生成代码比较两个 InternalRow 在给定的列数据的大小. 返回值为正数，表示大于,负数表示小于，0表示等于
 
-![](/docs/spark/codegen/codegen-context/codegen-order.svg)
+![](/docs/spark/sql/codegen/codegen-context/codegen-order.svg)
 
 ## GeneratePredicate
 
@@ -65,11 +65,11 @@ val predicate = Predicate.create(condition, input)
 
 Predicate.create 最终调用 GeneratePredicate.generate 函数生成一个 BasePredicate 的子类. GeneratePredicate 用于生成代码来判断表达示在 InternalRow 上运算的是否为 true 或 false.
 
-![](/docs/spark/codegen/codegen-context/codegen-predicate.svg)
+![](/docs/spark/sql/codegen/codegen-context/codegen-predicate.svg)
 
 ## Projection
 
-![](/docs/spark/codegen/codegen-context/codegen-projection-class.svg)
+![](/docs/spark/sql/codegen/codegen-context/codegen-projection-class.svg)
 
 Projection 意为投影的意思. 即将 表达示 apply到输入的 InternalRow 上的运算结果投影到另一个 InternalRow 上. 根据apply输出 InternalRow 的类型可以将Projection 分为 safe projection (SpecificInternalRow), 和 unsafe projection (UnsafeRow).
 
@@ -82,7 +82,7 @@ val safeProj = SafeProjection.create(schema1)
 
 SafeProjection.create 最终会调用到 GenerateSafeProjection.generate 函数生成一个 BaseProjection 的子类. 用于将输入的 InternalRow 转换为另一个 SpecificInternalRow.
 
-![](/docs/spark/codegen/codegen-context/codegen-SafeProjection.svg)
+![](/docs/spark/sql/codegen/codegen-context/codegen-SafeProjection.svg)
 
 ### GenerateUnsafeProjection
 
@@ -93,7 +93,7 @@ val unsafeProj = UnsafeProjection.create(schema1)
 
 UnsafeProjection.create 最终会调用到 GenerateUnsafeProjection.create 函数生成一个 UnsafeProjection 的子类. 用于将输入的 InternalRow 转换为另一个 UnsafeRow.
 
-![](/docs/spark/codegen/codegen-context/codegen-UnsafeProjection.svg)
+![](/docs/spark/sql/codegen/codegen-context/codegen-UnsafeProjection.svg)
 
 ### GenerateMutableProjection
 
@@ -103,4 +103,4 @@ val mutableProj = MutableProjection.create(Seq(BoundReference(0, IntegerType, tr
 
 MutableProjection.create 最终会调用到 GenerateMutableProjection.generate 函数生成一个 BaseMutableProjection 的子类用于将输入的 InternalRow 转换为另一个 InternalRow. 该类允许用户设定 target InternalRow, 如果没有指定， 则默认使用GenericInternalRow.
 
-![](/docs/spark/codegen/codegen-context/codegen-MutableProjection.svg)
+![](/docs/spark/sql/codegen/codegen-context/codegen-MutableProjection.svg)

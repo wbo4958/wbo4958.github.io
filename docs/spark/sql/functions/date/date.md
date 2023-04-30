@@ -1,9 +1,9 @@
 ---
 layout: page
-title: date/time
-nav_order: 5
-parent: Sql functions
-grand_parent: Spark
+title: func-date/time
+nav_order: 100001
+parent: sql
+grand_parent: spark
 ---
 
 # date/time

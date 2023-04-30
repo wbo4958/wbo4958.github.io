@@ -1,9 +1,9 @@
 ---
 layout: page
 title: Codegen生成类元素
-nav_order: 5
-parent: Codegen
-grand_parent: Spark
+nav_order: 5000
+parent: sql
+grand_parent: spark
 ---
 
 # Spark CodeGen Context
@@ -23,7 +23,7 @@ grand_parent: Spark
 
   表示一个 java 表达式， 变量名与变量的 java 类型.
 
-  ![codegen-exprvalue](/docs/spark/codegen/codegen-context/codegen-ExprValue.svg)
+  ![codegen-exprvalue](/docs/spark/sql/codegen/codegen-context/codegen-ExprValue.svg)
 
 - ExprCode
   

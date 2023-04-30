@@ -1,7 +1,7 @@
 ---
 layout: page
 title: Aggregation
-nav_order: 13 
+nav_order: 7 
 parent: sql
 grand_parent: spark 
 ---

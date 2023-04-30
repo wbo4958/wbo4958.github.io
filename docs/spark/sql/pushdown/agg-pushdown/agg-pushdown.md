@@ -1,9 +1,9 @@
 ---
 layout: page
 title: Aggregate pushdown
-nav_order: 7
-parent: Pushdown
-grand_parent: Spark
+nav_order: 13
+parent: sql
+grand_parent: spark
 ---
 
 # Aggregate Pushdown
@@ -103,7 +103,7 @@ Spark Optimizer 通过 `V2ScanRelationPushDown` rule 将 Aggregate push down 到
 
 具体流程图如下所示
 
-![optimizer-agg-pushdown](/docs/spark/pushdown/agg-pushdown/datareader-agg-pushdown.drawio.svg))
+![optimizer-agg-pushdown](/docs/spark/sql/pushdown/agg-pushdown/datareader-agg-pushdown.drawio.svg))
 
 V2ScanRelationPushDown 通过查找 `Aggregate -> [Project, Filter] -> Scan Builder` pattern, 然后找到需要 pushdown 的 Aggregate, 并转换成 connector 的 Aggregate 函数. 最后更新到 Scan builder 里, 并 build 对应的 Scan.
 
@@ -111,7 +111,7 @@ V2ScanRelationPushDown 通过查找 `Aggregate -> [Project, Filter] -> Scan Buil
 
 Parquet 文件的 Footer 记录着每个 RowGroup 的统计信息如 (max/min/count), 所以对 Parquet 文件可以进行 Aggregate pushdown. ORC 同理.
 
-![parquet pushdown](/docs/spark/pushdown/agg-pushdown/datareader-parquet-agg-pushdown.drawio.svg)
+![parquet pushdown](/docs/spark/sql/pushdown/agg-pushdown/datareader-parquet-agg-pushdown.drawio.svg)
 
 Spark 读取每个 Parquet 文件的 Footer 信息,　获得每个 RowGroup 的统计信息,　然后根据 pushdown 的　Aggregate 进行计算, 获得最后的结果.　可以看出 Aggregate pushdown 不会读取任何的真实数据,　仅仅读取每个文件的 Footer 信息,　然后进行 Aggregate, 可以说大大的提升 Performance.
 
