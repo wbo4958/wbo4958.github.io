@@ -64,7 +64,7 @@ def apply[T : TypeTag](): ExpressionEncoder[T] = {
 
 得到的 ExpressionEncoder 如下图所示,
 
-![ExpressionEncoder](/docs/spark/encoder/encoder.svg)
+![ExpressionEncoder](/docs/spark/sql/encoder/encoder.svg)
 
 ### objSerializer
 

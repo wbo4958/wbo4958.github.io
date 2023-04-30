@@ -67,7 +67,7 @@ def testUnboundedWindowFunctionFrame(spark: SparkSession) = {
 
 ## QueryPlans
 
-![window query plans](/docs/spark/window/window-queryExecution.svg)
+![window query plans](/docs/spark/sql/window/window-queryExecution.svg)
 
 - Logical Plan
   
@@ -188,7 +188,7 @@ Window operator 在 child 的 rdd 上做了一次 mapPartitions 操作. 从上�
 
 那我们来看下 window operator 是怎么进行数据驱动的.
 
-![data-driven](/docs/spark/window/window-data-driven.svg)
+![data-driven](/docs/spark/sql/window/window-data-driven.svg)
 
 其中
 
@@ -209,17 +209,17 @@ next 函数通过 bufferIterator 获得当前需要被处理的行, 然后将该
 
 Spark 3.1.1 中实现了 7 种不同的 WindowFunctionFrame 用于优化不同的场景.
 
-![window function frame](/docs/spark/window/window-WindowFuncFrame.svg)
+![window function frame](/docs/spark/sql/window/window-WindowFuncFrame.svg)
 
 如图所示, 根据 window 函数的类型, 以及 WindowFrame 的 lower/upper 来决定最终选择哪个 WindowFunctionFrame 来实现.Window 函数分为两种，一种是利用 Aggregation 的函数如 Sum/Max/Min, 另一种是自定义的 Window Function, 如下所示.
 
-![window function](/docs/spark/window/window-windowfunction.svg)
+![window function](/docs/spark/sql/window/window-windowfunction.svg)
 
 WindowFunctionFrame 的实现，以 UnboundedWindowFunctionFrame 为例，该 UnboundedWindowFunctionFrame 中 lower/upper 都是无界，也就是说 window frame 是无界的，也就是每行的 window frame都一行，包含所有的数据。所以只需要计算一次，没必要为每行都计算.
 
 下面来看下 SlidingWindowFunctionFrame 的实现方式.
 
-![Slide window function frame](/docs/spark/window/window_frame.gif)
+![Slide window function frame](/docs/spark/sql/window/window_frame.gif)
 
 ## Window Frame 类型
 

@@ -23,7 +23,7 @@ Spark catalyst 有一类特别的 non-query LogicalPlan - Command, 对应于 DDL
 
 DataWritingCommand 是写数据的 Command, 下面是与非 Hive 相关的实现类
 
-![DataWritingCommand](/docs/spark/data-write/datawrite-DataWritingCommand.svg)
+![DataWritingCommand](/docs/spark/sql/data-write/datawrite-DataWritingCommand.svg)
 
 DataWritingCommand 中定义了 query, 即生成待写入到文件中的数据.
 
@@ -91,7 +91,7 @@ df.write.mode(SaveMode.Overwrite).parquet("/tmp/parquet")
 
 上述代码将 Local 数据写入到本地文件中.
 
-![InsertIntoHadoopFsRelationCommand](/docs/spark/data-write/datawrite-cpu_save.svg)
+![InsertIntoHadoopFsRelationCommand](/docs/spark/sql/data-write/datawrite-cpu_save.svg)
 
 上述 data write 非为 2 步， 第一步生成 InsertIntoHadoopFsRelationCommand, 第二次 run InsertIntoHadoopFsRelationCommand.
 
@@ -112,4 +112,4 @@ df.write.mode(SaveMode.Overwrite)
 
 CreateDataSourceTableAsSelectCommand 会生成 InsertIntoHadoopFsRelationCommand, 然后通过 InsertIntoHadoopFsRelationCommand.run 来进行 data write.
 
-![](/docs/spark/data-write/bucket-file-format.png)
+![](/docs/spark/sql/data-write/bucket-file-format.png)

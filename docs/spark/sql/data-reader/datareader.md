@@ -79,11 +79,11 @@ private val extraOptions = new scala.collection.mutable.HashMap[String, String]
 
 首先看下 data source 的类图结构. 几乎所有的 data source 都直接或间接实现了 DataSourceRegister, 而 v1 data source 实现了 FileFormat, v2 data source 实现 TableProvider 并继承于 FileDataSourceV2.
 
-![data source](/docs/spark/data-reader/datareader-data-source.svg)
+![data source](/docs/spark/sql/data-reader/datareader-data-source.svg)
 
 接下来看下 Spark 怎么 load 数据到 Dataset, 最后是怎么生成 RDD的, 如下图所示
 
-![data reader](/docs/spark/data-reader/datareader-overview.svg)
+![data reader](/docs/spark/sql/data-reader/datareader-overview.svg)
 
 从图中可以看出,
 
@@ -124,7 +124,7 @@ private val extraOptions = new scala.collection.mutable.HashMap[String, String]
 
 v1 和 v2 最后生成的 LogicalPlan 都间接包含 FileIndex, 在这里其实都是 InMemoryFileIndex 这个实现类, InMemoryFileIndex 主要是根据输入的文件或文件夹递归的查找叶子文件, 并推断出分区信息.
 
-InMemoryFileIndex 在构造函数中会扫描输入的文件. 如图所示 ![InMemoryFileIndex](/docs/spark/data-reader/datareader-InMemoryFileIndex.svg)
+InMemoryFileIndex 在构造函数中会扫描输入的文件. 如图所示 ![InMemoryFileIndex](/docs/spark/sql/data-reader/datareader-InMemoryFileIndex.svg)
 
 整个过程很简单, 通过 FileSystem.listStatus 递归的查找 child 文件或文件夹. 如果当 child 的数量大于某个值由 `spark.sql.sources.parallelPartitionDiscovery.parallelism` 指定 (默认32), 会将查询 job 提交到 Spark cluster执行, 这样查询速度会更快.
 
@@ -238,7 +238,7 @@ Try(Literal.create(Integer.parseInt(raw), IntegerType))
   ))
   ```
 
-下面这张图描述了怎么样推断出 Parquet 的 schema. ![parquet-infer-schema](/docs/spark/data-reader/datareader-parquet-infer-schema.svg)
+下面这张图描述了怎么样推断出 Parquet 的 schema. ![parquet-infer-schema](/docs/spark/sql/data-reader/datareader-parquet-infer-schema.svg)
 
 ## LogicalPlan 到 PhysicalPlan
 
@@ -254,7 +254,7 @@ Try(Literal.create(Integer.parseInt(raw), IntegerType))
 
 PhysicalPlan 生成最后的 RDD. 对于 Row-wised 的 PhysicalPlan 通过 doExecute() 触发, 而对于 Columnar-wised 通过 doExecuteColumnar 来触发.
 
-![physicalplan rdd](/docs/spark/data-reader/datareader-physicalplan-rdd.svg)
+![physicalplan rdd](/docs/spark/sql/data-reader/datareader-physicalplan-rdd.svg)
 
 - v1
 
@@ -268,7 +268,7 @@ PhysicalPlan 生成最后的 RDD. 对于 Row-wised 的 PhysicalPlan 通过 doExe
 
 不管是 v1 最后生成的 FileSourceRDD 还是 v2 生成的 DataSourceRDD, 当 `spark.sql.parquet.enableVectorizedReader` 打开时 (默认为true), 则创建 VectorizedParquetRecordReader 读取 Parquet 文件返回 ColumnBatch, 反之创建 ParquetRecordReader 返回 InternalRow.
 
-![rdd-read](/docs/spark/data-reader/datareader-rdd-read.svg)
+![rdd-read](/docs/spark/sql/data-reader/datareader-rdd-read.svg)
 
 ## Filters PushDown (谓词下推)
 

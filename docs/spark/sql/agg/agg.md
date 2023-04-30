@@ -118,7 +118,7 @@ scala> df0.groupBy("dept").max("age").show()
 
 下图是 Spark built-in 的 AggregateFunction
 
-![AggregateFunction](/docs/spark/agg/AggregationFunction.png)
+![AggregateFunction](/docs/spark/sql/agg/AggregationFunction.png)
 
 AggregateFunction 分为2类
 
@@ -141,7 +141,7 @@ AggregateFunction 分为2类
 
 Spark 目前提供3种不同的方式实现 Aggregation
 
-![plan-agg](/docs/spark/agg/agg-plan_agg.svg)
+![plan-agg](/docs/spark/sql/agg/agg-plan_agg.svg)
 
 分别为 HashAggregateExec/ObjectHashAggregateExec/SortAggregateExec
 
@@ -155,13 +155,13 @@ HashAggregateExec 只适用于那些 `Agg column` 能在 UnSafeRow 上直接更�
 
 - SparkPlan
 
-![HashAggregateExec](/docs/spark/agg/agg-HashAggregateExec.svg)
+![HashAggregateExec](/docs/spark/sql/agg/agg-HashAggregateExec.svg)
 
 HashAggregateExec 支持 CodeGen, 它生成的代码可以参考 [aggregation-max](https://github.com/wbo4958/wbo4958.github.io/blob/master/data/groupby_max.java)
 
 - HashAggregateExec doAgg
   
-![doAgg](/docs/spark/agg/agg-HashAgg_doAgg.svg)
+![doAgg](/docs/spark/sql/agg/agg-HashAgg_doAgg.svg)
 
 HashAggregateExec 首先尝试 FastHashMap, 然后再尝试 Regular HashMap.
 
@@ -173,7 +173,7 @@ FastHashMap 是一个固定数量的 HashMap, 内部采用 `int[(1<<16) * 2] buc
 
 ### ObjectHashAggregateExec
 
-![ObjectHashAggregateExec](/docs/spark/agg/agg-ObjectHashAggregateExec.svg)
+![ObjectHashAggregateExec](/docs/spark/sql/agg/agg-ObjectHashAggregateExec.svg)
 
 `spark.sql.execution.useObjectHashAggregateExec` 控制是否使用ObjectHashAggregateExec, 且 ObjectHashAggregateExec 只支持 TypedImperativeAggregate(允许任意的user defined jvm 对象作为 agg buffer), 如 CollectList/CollectSet.
 
@@ -181,12 +181,12 @@ ObjectHashAggregateExec 首先使用 HashMap 存储直接以 `group By` 整个 U
 
 - ObjectAggregationIterator
 
-![ObjectAggregationIterator](/docs/spark/agg/agg-ObjectAggregationIterator.svg)
+![ObjectAggregationIterator](/docs/spark/sql/agg/agg-ObjectAggregationIterator.svg)
 
 ### SortAggregateExec
 
-![SortAggregateExec](/docs/spark/agg/agg-SortAggregateExec.svg)
+![SortAggregateExec](/docs/spark/sql/agg/agg-SortAggregateExec.svg)
 
 当 plan aggregate 时，如果 `HashAggregateExec/ObjectHashAggregateExec` 没有被匹配上，则默认使用 SortAggregateExec. SortAggregateExec 会要求对 group by 先进行 sort. 然后再做 agg.
 
-![SortBasedAggregationIterator](/docs/spark/agg/agg-SortBasedAggregationIterator.svg)
+![SortBasedAggregationIterator](/docs/spark/sql/agg/agg-SortBasedAggregationIterator.svg)

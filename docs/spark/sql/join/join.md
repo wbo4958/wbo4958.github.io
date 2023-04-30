@@ -110,11 +110,11 @@ Join LogicalPlan 包含上述几个内容， 参与 join 的 plans, join条件�
 
 Join 是一个算子， Spark对 Join 算子有多种实现, 如 BHJ/SMJ/SHJ ... 这些实现最后生成的 Join 结果是一致的, 但是不同的实现应用的场景或许不一样，因此不同的实现带来的 performance 也不一样.
 
-![join plan](/docs/spark/join/join-plan-join.svg)
+![join plan](/docs/spark/sql/join/join-plan-join.svg)
 
 简化成如下这张表
 
-![join plan condition](/docs/spark/join/join-plan-condition.svg)
+![join plan condition](/docs/spark/sql/join/join-plan-condition.svg)
 
 Join 中几个比较常见的术语
 
@@ -140,7 +140,7 @@ Join 中几个比较常见的术语
    +- LocalTableScan [dept_name#18, std_id#19]
 ```
 
-![bhj](/docs/spark/join/join-bhj-execute.svg)
+![bhj](/docs/spark/sql/join/join-bhj-execute.svg)
 
 如果简单的来说就是
 
@@ -179,7 +179,7 @@ BroadcastHashJoinExec 中 requiredChildDistribution 定义如下,
       +- LocalTableScan [dept_name#18, std_id#19]
 ```
 
-![smj exec](/docs/spark/join/join-smj-exec.svg)
+![smj exec](/docs/spark/sql/join/join-smj-exec.svg)
 
 ``` scala
   override def requiredChildDistribution: Seq[Distribution] = {
@@ -220,7 +220,7 @@ BroadcastHashJoinExec 中 requiredChildDistribution 定义如下,
    +- LocalTableScan [dept_name#18, std_id#19]
 ```
 
-![shj](/docs/spark/join/join-shj.svg)
+![shj](/docs/spark/sql/join/join-shj.svg)
 
 ShuffledHashJoinExec 与 SortMergeJoinExec 都继承同一个 ShuffledJoin, 即它们有相同的 requiredChildDistribution 定义， 也就是当 children 的数据分布不符合要求时，此时需要插入 ShuffleExchangeExec.
 
@@ -245,7 +245,7 @@ CartesianProduct (dept_name#8 = dept_name#18)
 
 迪卡尔乘积不会引入任何的 shuffle 和 sort, 它支持 equal join 和 非 equal join. 它将 left child 和 right child 进行迪卡尔乘积， 然后通过 join condition 进行 eval, 最后再将得到的结果再进行合并到一个 buffer byte数组 中. 整个过程如下所示,
 
-![cartesian product](/docs/spark/join/join-CartesianProduct.svg)
+![cartesian product](/docs/spark/sql/join/join-CartesianProduct.svg)
 
 ### BroadcastNestedLoopJoinExec
 
@@ -257,7 +257,7 @@ CartesianProduct (dept_name#8 = dept_name#18)
    +- LocalTableScan [dept_name#18, std_id#19]
 ```
 
-![BroadcastNestedLoopJoinExec](/docs/spark/join/join-BroadcastNestedLoopJoin.svg)
+![BroadcastNestedLoopJoinExec](/docs/spark/sql/join/join-BroadcastNestedLoopJoin.svg)
 
 BroadcastNestedLoopJoinExec 可以用于 EqualJoin 和 Non-EqualJoin 两种.
 
