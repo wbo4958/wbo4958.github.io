@@ -1,8 +1,8 @@
 ---
 layout: page
-title: Spark connect 实现
-nav_order: 10 
-parent: Spark 
+title: connect
+nav_order: 300
+parent: spark 
 ---
 
 # Spark Connect

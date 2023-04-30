@@ -1,8 +1,8 @@
 ---
 layout: page
-title: Spark
-nav_order: 10 
+title: spark
+nav_order: 1
 has_children: true
-permalink: /Spark/
+permalink: /spark/
 ---
 # Spark Contents

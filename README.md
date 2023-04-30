@@ -19,3 +19,8 @@ gem install just-the-docs jekyll-optional-front-matter jekyll-default-layout jek
 ``` bash
 jekyll serve
 ```
+
+
+## Tips for markdown
+
+reference to other section of [genComp](/docs/spark/sql/codegen/codegen-context/codegencontext2.html#gencomp)

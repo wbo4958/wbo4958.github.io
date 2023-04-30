@@ -1,9 +1,9 @@
 ---
 layout: page
-title: RDD
-parent: Spark
+title: rdd
+parent: spark
 nav_order: 100000
 has_children: true
-permalink: /Spark/RDD/
+permalink: /spark/rdd/
 ---
 # RDD Contents

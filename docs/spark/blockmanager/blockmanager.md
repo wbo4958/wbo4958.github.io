@@ -1,9 +1,9 @@
 ---
 layout: page
 title: BlockManager
-parent: Spark
-nav_order: 800
+parent: spark
+nav_order: 200
 has_children: true
-permalink: /Spark/BlockManager/
+permalink: /spark/BlockManager/
 ---
 # Spark BlockManager Contents

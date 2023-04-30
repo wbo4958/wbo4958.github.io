@@ -1,9 +1,9 @@
 ---
 layout: page
 title: reduceByKey
-nav_order:  10000001
-parent: RDD 
-grand_parent: Spark
+nav_order:  1
+parent: rdd 
+grand_parent: spark
 ---
 
 # Spark RDD reduceByKey
