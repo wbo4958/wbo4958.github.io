@@ -2,7 +2,8 @@
 layout: page
 title: window 实现
 nav_order: 10
-parent: Spark 
+parent: sql
+grand_parent: spark 
 ---
 
 # Spark SQL window

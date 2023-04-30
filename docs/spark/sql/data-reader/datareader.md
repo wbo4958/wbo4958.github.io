@@ -2,7 +2,8 @@
 layout: page
 title: Data Reader
 nav_order: 5
-parent: Spark 
+parent: sql
+grand_parent: spark 
 ---
 
 # Spark Data Reader

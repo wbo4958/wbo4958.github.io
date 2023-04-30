@@ -1,8 +1,9 @@
 ---
 layout: page
 title: Data writer
-nav_order: 5
-parent: Spark 
+nav_order: 6
+parent: sql
+grand_parent: spark 
 ---
 
 # Spark Data writer

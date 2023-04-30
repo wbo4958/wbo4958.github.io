@@ -2,7 +2,8 @@
 layout: page
 title: Encoder
 nav_order: 700 
-parent: Spark 
+parent: sql
+grand_parent: spark 
 ---
 
 # Spark Encoder

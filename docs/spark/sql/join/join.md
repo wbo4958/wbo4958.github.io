@@ -1,8 +1,9 @@
 ---
 layout: page
 title: Join
-nav_order: 13 
-parent: Spark 
+nav_order: 7 
+parent: sql
+grand_parent: spark 
 ---
 
 # Spark Join
