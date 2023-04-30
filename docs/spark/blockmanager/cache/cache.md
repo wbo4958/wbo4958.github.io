@@ -3,7 +3,7 @@ layout: page
 title: RDD cache
 nav_order: 10
 parent: BlockManager
-grand_parent: Spark
+grand_parent: spark
 ---
 
 # RDD cache

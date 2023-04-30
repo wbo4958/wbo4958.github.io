@@ -3,7 +3,7 @@ layout: page
 title: BlockManager Overview
 nav_order: 5
 parent: BlockManager
-grand_parent: Spark
+grand_parent: spark
 ---
 
 # BlockManager

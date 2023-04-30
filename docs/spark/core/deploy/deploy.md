@@ -2,8 +2,8 @@
 layout: page
 title: Standalone Deploy 
 nav_order: 5
-parent: SparkCore 
-grand_parent: Spark
+parent: core 
+grand_parent: spark
 ---
 
 # Spark Standalone Deploy

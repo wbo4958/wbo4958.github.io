@@ -2,7 +2,8 @@
 layout: page
 title: Shuffle 实现
 nav_order: 9 
-parent: Spark 
+parent: sql
+grand_parent: spark 
 ---
 
 # Spark Shuffle

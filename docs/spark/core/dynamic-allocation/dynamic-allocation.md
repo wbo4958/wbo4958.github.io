@@ -2,8 +2,8 @@
 layout: page
 title: Dynamic Allocation
 nav_order: 7
-parent: SparkCore 
-grand_parent: Spark
+parent: core 
+grand_parent: spark
 ---
 
 # Dynamic Allocation

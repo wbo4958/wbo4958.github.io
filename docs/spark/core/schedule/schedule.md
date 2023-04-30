@@ -2,8 +2,8 @@
 layout: page
 title: Spark Task调度
 nav_order: 6
-parent: SparkCore 
-grand_parent: Spark
+parent: core 
+grand_parent: spark
 ---
 
 # Spark 调度
