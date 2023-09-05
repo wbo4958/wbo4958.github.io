@@ -85,6 +85,9 @@ makeRDD 创建一个带有 partition location 的 ParallelCollectionRDD. Spark �
 7. 重复3, 2, 直到所有 task 都被 offer 了resource, 或者所有 worker resources 已经被 assign 完了
 8. send task 到 executor 执行.
 
+
+注意: spark 分别为 PROCESS_LOCAL/NODE_LOCAL/RACK_LOCAL 设置为默认的 timeout 时间, 默认 `spark.locality.wait=3s` (表示 3s 超时后, 开始选择下一个 locality level). 但是也可以分别设置不同的 timeout 时间, 分别由 `spark.locality.wait.process`, `spark.locality.wait.node`, `spark.locality.wait.rack` 指定.
+
 ### ResultStage
 
 当计算完 shuffle stage 后, 最后计算 ResultStage, 而该 ResultStage 的输入也就是 ShuffleMapStage 的输出. 其过程大部分与 ShuffleMapStage 相同, 但是在获得 partition location 时不同, 具体如下,
@@ -93,3 +96,43 @@ makeRDD 创建一个带有 partition location 的 ParallelCollectionRDD. Spark �
 2. 如果 `spark.shuffle.reduceLocality.enabled=false`, 则直接返回 empty list, 表示 shuffle read 不需要 locality 信息.
 3. 如果 `shuffle write`/`shuffle read` 的partition数量超过 1000, 也直接返回 empty list, 表示 shuffle read 不需要 locality 信息.
 4. 然后根据 reducer task mapId 获得 MapStatus, 并获得该 reducerId block size. 最后计算 `reducer block size / total block size`, 如果大于等于 0.2 则返回该 host 作为 locality 信息.
+
+
+### 调度log
+
+- shuffle stage
+
+``` console
+23/09/05 09:06:46 INFO TaskSetManager: Starting task 0.0 in stage 0.0 (TID 0) (192.168.23.10, executor 1, partition 0, NODE_LOCAL, 7309 bytes)
+23/09/05 09:06:46 INFO TaskSetManager: Starting task 6.0 in stage 0.0 (TID 1) (192.168.23.22, executor 0, partition 6, NODE_LOCAL, 7309 bytes)
+23/09/05 09:06:46 INFO TaskSetManager: Starting task 1.0 in stage 0.0 (TID 2) (192.168.23.10, executor 1, partition 1, NODE_LOCAL, 7309 bytes)
+23/09/05 09:06:46 INFO TaskSetManager: Starting task 7.0 in stage 0.0 (TID 3) (192.168.23.22, executor 0, partition 7, NODE_LOCAL, 7309 bytes)
+23/09/05 09:06:46 INFO TaskSetManager: Starting task 2.0 in stage 0.0 (TID 4) (192.168.23.10, executor 1, partition 2, NODE_LOCAL, 7309 bytes)
+23/09/05 09:06:46 INFO TaskSetManager: Starting task 3.0 in stage 0.0 (TID 5) (192.168.23.10, executor 1, partition 3, NODE_LOCAL, 7309 bytes)
+23/09/05 09:06:46 INFO TaskSetManager: Starting task 4.0 in stage 0.0 (TID 6) (192.168.23.10, executor 1, partition 4, NODE_LOCAL, 7309 bytes)
+23/09/05 09:06:46 INFO TaskSetManager: Starting task 5.0 in stage 0.0 (TID 7) (192.168.23.10, executor 1, partition 5, NODE_LOCAL, 7309 bytes)
+```
+
+对于 shuffle stage, 有两个 worker offer, 分别为 (192.168.23.10, 192.168.23.22), 由于 offer resource 是 round robin way,
+
+1. 遍历 offers, 得到 192.168.23.10, 从 TaskSetManager 中 forHost.get("192.168.23.10") 获得需要调度的 partition 0
+2. 遍历 offers, 得到 192.168.23.22, 从 TaskSetManager 中 forHost.get("192.168.23.22") 获得需要调度的 partition 6
+3. 重复 1, 2, 依次调度 partition 1, 7.
+4. 在 step 3 后, 192.168.23.22 上的 partition 已经没有待计算的 partition 了
+5. 遍历 offers, 得到 192.168.23.10, 从 TaskSetManager 中 forHost.get("192.168.23.10") 获得需要调度的 partition 2
+6. 遍历 offers, 得到 192.168.23.12, TaskSetManager 中 forHost.get("192.168.23.12") 中已经没有partition, pass
+7. 遍历 offers, 得到 192.168.23.10, 从 TaskSetManager 中 forHost.get("192.168.23.10") 获得需要调度的 partition 3
+8. 遍历 offers, 得到 192.168.23.12, TaskSetManager 中 forHost.get("192.168.23.12") 中已经没有partition, pass
+5. 遍历 offers, 得到 192.168.23.10, 从 TaskSetManager 中 forHost.get("192.168.23.10") 获得需要调度的 partition 4
+6. 遍历 offers, 得到 192.168.23.12, TaskSetManager 中 forHost.get("192.168.23.12") 中已经没有partition, pass
+7. 遍历 offers, 得到 192.168.23.10, 从 TaskSetManager 中 forHost.get("192.168.23.10") 获得需要调度的 partition 5
+8. 遍历 offers, 得到 192.168.23.12, TaskSetManager 中 forHost.get("192.168.23.12") 中已经没有partition, pass
+
+- result stage
+
+``` console
+23/09/05 09:06:47 INFO TaskSetManager: Starting task 0.0 in stage 1.0 (TID 8) (192.168.23.10, executor 1, partition 0, NODE_LOCAL, 7461 bytes)
+23/09/05 09:06:47 INFO TaskSetManager: Starting task 1.0 in stage 1.0 (TID 9) (192.168.23.22, executor 0, partition 1, NODE_LOCAL, 7461 bytes)
+```
+
+result tasks 的 数据 在两个 worker 上都有, 所以它们的 location 信息都是 (192.168.23.10, 192.168.23.22), 最后的调度信息如上所示.
