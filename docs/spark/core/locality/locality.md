@@ -136,3 +136,79 @@ makeRDD 创建一个带有 partition location 的 ParallelCollectionRDD. Spark �
 ```
 
 result tasks 的 数据 在两个 worker 上都有, 所以它们的 location 信息都是 (192.168.23.10, 192.168.23.22), 最后的调度信息如上所示.
+
+### PROCESS LOCAL
+
+上面的例子是数据在 host 节点, 但是这并不是最优的情况, 因为即使数据在 host, 对于 task 也有可能会从 host 的 disk 直接读取数据,此时会涉及 磁盘 IO, 而 磁盘 IO 本身是比较耗时的操作. 那有没有一种更快的 locality. 如果数据已经在 executor 进程中也就是 PROCEE_LOCAL, 此时 task 直接从内存中获得数据, 这时是最快的选项.
+
+那什么样的数据会已经存在于 executor 中了呢?
+
+从 TaskSetManager.addPendingTask 代码中可以看出
+
+``` scala
+    for (loc <- tasks(index).preferredLocations) {
+      loc match {
+        case e: ExecutorCacheTaskLocation =>
+          pendingTaskSetToAddTo.forExecutor.getOrElseUpdate(e.executorId, new ArrayBuffer) += index
+        case e: HDFSCacheTaskLocation =>
+          val exe = sched.getExecutorsAliveOnHost(loc.host)
+          exe match {
+            case Some(set) =>
+              for (e <- set) {
+                pendingTaskSetToAddTo.forExecutor.getOrElseUpdate(e, new ArrayBuffer) += index
+              }
+              logInfo(s"Pending task $index has a cached location at ${e.host} " +
+                ", where there are executors " + set.mkString(","))
+            case None => logDebug(s"Pending task $index has a cached location at ${e.host} " +
+              ", but there are no executors alive there.")
+          }
+        case _ =>
+      }
+      ...
+```
+
+当 TaskLocation 为 ExecutorCacheTaskLocation 或 HDFSCacheTaskLocation 时, 此时表示数据已经与 executor 在同一个进程中了.
+
+- ExecutorCacheTaskLocation
+
+比如 kafka 过来的数据, 或都是 streaming 相关, 又或者是 BlockManager 里面的数据.
+
+``` console
+var rdd = sc.makeRDD(
+  List(
+    (1000, List("192.168.23.10")),
+    (1001, List("192.168.23.10")),
+    (1002, List("192.168.23.10")),
+    (1003, List("192.168.23.10")),
+    (1004, List("192.168.23.10")),
+    (1005, List("192.168.23.10")),
+    (1006, List("192.168.23.10", "192.168.23.22")),
+    (1007, List("192.168.23.10", "192.168.23.22")),
+  )
+)
+rdd.cache().repartition(2).collect()
+rdd.collect()
+```
+
+上面的例子在 rdd 后加了一个 cache, 那么在第一次 collect 时, 会将 rdd 的计算结果 cache 到  BlockManager 中. 第二次 collect, 那直接就从 BlockManager 里去取, 并不会再重新计算 RDD.
+
+```
+23/09/07 06:41:05 INFO TaskSetManager: Starting task 0.0 in stage 2.0 (TID 10) (192.168.23.10, executor 1, partition 0, PROCESS_LOCAL, 7320 bytes)
+23/09/07 06:41:05 INFO TaskSetManager: Starting task 6.0 in stage 2.0 (TID 11) (192.168.23.22, executor 0, partition 6, PROCESS_LOCAL, 7320 bytes)
+23/09/07 06:41:05 INFO TaskSetManager: Starting task 1.0 in stage 2.0 (TID 12) (192.168.23.10, executor 1, partition 1, PROCESS_LOCAL, 7320 bytes)
+23/09/07 06:41:05 INFO TaskSetManager: Starting task 7.0 in stage 2.0 (TID 13) (192.168.23.22, executor 0, partition 7, PROCESS_LOCAL, 7320 bytes)
+23/09/07 06:41:05 INFO TaskSetManager: Starting task 2.0 in stage 2.0 (TID 14) (192.168.23.10, executor 1, partition 2, PROCESS_LOCAL, 7320 bytes)
+23/09/07 06:41:05 INFO TaskSetManager: Starting task 3.0 in stage 2.0 (TID 15) (192.168.23.10, executor 1, partition 3, PROCESS_LOCAL, 7320 bytes)
+23/09/07 06:41:05 INFO TaskSetManager: Starting task 4.0 in stage 2.0 (TID 16) (192.168.23.10, executor 1, partition 4, PROCESS_LOCAL, 7320 bytes)
+23/09/07 06:41:05 INFO TaskSetManager: Starting task 5.0 in stage 2.0 (TID 17) (192.168.23.10, executor 1, partition 5, PROCESS_LOCAL, 7320 bytes)
+```
+
+上面可以看出, LOCALITY LEVEL 已经变成 PROCESS_LEVEL 了. 其实 Spark 做法很简单
+
+在第一次 collect 过程中, DAGscheduler.getCacheLocs 检查到 ParallelRDD 的 storage level 不为 None, 同时 rdd 还没被计算, 也就是 BlockManager 中还没有其数据,所有这里直接返回为空, 直接从 ParallelRDD 中获得 partition locality 信息.
+
+在第二次 collect 过程中. rdd 的计算结果已经缓存到了 BlockManager 中. DAGscheduler.getCacheLocs 会生成 ExecutorCacheTaskLocation 并将其保存到 cacheLocs 中, 并返回. 所以第二次的数据将直接从 executor 所在的进程 memory 直接读取.
+
+- HDFSCacheTaskLocation
+
+HDFSCacheTaskLocation 表示 HDFS 数据已经读取到 executor memory 中了. 比如 HadoopRDD 里获得的 Location.
