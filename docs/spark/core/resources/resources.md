@@ -6,12 +6,11 @@ parent: core
 grand_parent: spark
 ---
 
-# Spark GPU scheduling
+# Spark Resource
 {: .no_toc}
 
-> Spark 3.0+ 新加入了 `GPU/FPGA` Scheduling, 对于 Spark application 加速来说是非常具有吸引力的.
-> 现在的Node中基本会装多张GPU, 如果没有GPU Scheduling的话，很难利用多GPU的优势。本文基于 Spark 3.3.0-SNAPSHOT
-> 学习 Spark GPU scheduling 过程.
+Spark 在 2.x 版本支持 cpu cores 和 memory 等配置用于"资源"的目的, 但并没有把它们真正归结于资源. 从 Spark 3.1 开始, 
+将 cpu/memory 归结于资源, 同时还包括增加的 GPU/FPGA 等资源.
 
 ## 目录
 {: .no_toc .text-delta}
@@ -21,11 +20,27 @@ grand_parent: spark
 
 ## OverView
 
-下面是一张GPU/FPGA资源分配与释放过程的OverView图
+![resource profile](/docs/spark/core/resources/stage-level-scheduling-ResourceProfile.drawio.svg)
 
-![gpu_fpga分配与释放](./assets/gpu_scheduling.png)
+每个 ResourceProfile 包含一个固定的 id, 以及 ExecutorResourceRequest 和 TaskResourceRequests.
 
-> 注意，文中所说的资源都是指GPU/FPGA资源
+ExecutorResourceRequest 仅代表 Executor 所有资源中的一个资源, 如 cores. 同理 TaskResourceRequest 也仅仅是 task 所有资源中的一个资源, 如 cpus.
+
+Spark 支持 stage level scheduling, 对于不同的 stage, 所需求的 Resource 不同, 那 ResourceProfile 也不同. 本文主要是了解 ResourceProfile 并不会涉及到 stage-level scheduling, 所以默认 整个 spark application 中只有一个默认的 ResourceProfile.
+
+
+## Cluster Resources
+
+![cluster resources](/docs/spark/core/resources/stage-level-scheduling-resource-overview.drawio.svg)
+
+上图是整个 spark cluster 包括 driver 的 Resource 流程图.
+
+
+###　Step 1: Worker 配置 Resources
+
+Spark 在启动 worker 时是可以指定 Worker 的 cores/memory 以及 ResourceProfile file. 
+也可以通过环境变量比如 `SPARK_WORKER_CORES`, `SPARK_WORKER_MEMORY` 分别指定 Worker 的 cores/memory,
+以及 `spark.worker.resourcesFile` 配置来指定　worker 的　resource 文件.　如果没有指定, worker 也可以自己推断出来.
 
 ## Application代码如何使用GPU/FPGA
 
