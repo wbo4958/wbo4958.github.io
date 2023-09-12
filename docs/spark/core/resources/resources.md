@@ -36,165 +36,84 @@ Spark 支持 stage level scheduling, 对于不同的 stage, 所需求的 Resourc
 上图是整个 spark cluster 包括 driver 的 Resource 流程图.
 
 
-###　Step 1: Worker 配置 Resources
+1. Step 1: Worker 配置 Resources
 
 Spark 在启动 worker 时是可以指定 Worker 的 cores/memory 以及 ResourceProfile file. 
 也可以通过环境变量比如 `SPARK_WORKER_CORES`, `SPARK_WORKER_MEMORY` 分别指定 Worker 的 cores/memory,
-以及 `spark.worker.resourcesFile` 配置来指定　worker 的　resource 文件.　如果没有指定, worker 也可以自己推断出来.
+如果没有指定, worker 也可以自己推断出来.
 
-## Application代码如何使用GPU/FPGA
+其中可以通过下面三种方式来获得 worker 的资源.
 
-请先参考[Custom Resource Scheduling and Configuration Overview](https://github.com/apache/spark/blob/master/docs/configuration.md#custom-resource-scheduling-and-configuration-overview)
+- `spark.worker.resourcesFile` 指定分配给 worker 的 resource 信息, 保存在一个 JSON 文件中.
 
-下面是一个DEMO
-
-``` scala
-val rdd = sc.makeRDD(1 to 10, 5).mapPartitions(itr => {
-  val context = TaskContext.get() //获得Task的运行Context
-  val resources = context.resources()
-  if (resources.contains("gpu")) {
-    // Task 端可以使用 resources("gpu").addresses 获得 GPU id 进行加速
-    resources("gpu").addresses.iterator
-  } else {
-    Iterator.empty
-  }
-})
-val gpuDeviceList = rdd.collect()
-gpuDeviceList.map(x => println("==> gpu id:" + x))
+``` xml
+--conf spark.worker.resource.gpu.amount=2  # worker申请2个GPU, 可以不配置
+--conf spark.worker.resource.fpga.amount=3  #worker 申请3个fpga, 可以不配置
+--conf spark.worker.resourcesFile=/tmp/gpu_fpga_conf.json #分配给该worker的gpu资源
 ```
 
-上面这段代码可以很简单的使用到 GPU 资源. 但是它的整个流程是怎么样的？ 工作原理呢？下面的章节主要是分析整个GPU Scheduling过程.
+gpu_fpga_conf.json 文件如下所示
 
-## GPU/FPGA资源部署
-
-### worker端配置可用resource
-
-首先需要为Worker端配置**它所能提供**的可用于加速的计算资源如GPU/FPGA. 对于 Worker 端有 2 种方式配置资源
-
-配置都需要放在 `${SPARK_HOME}/conf/spark-defaults.conf` 中,
-
-1. `spark.worker.resourcesFile` 指定分配给 worker 的 resource 信息, 保存在一个文件中, 只在 Standalone 有用.
-
-  ``` xml
-  --conf spark.worker.resource.gpu.amount=2  # worker申请2个GPU, 可以不配置
-  --conf spark.worker.resource.fpga.amount=3  #worker 申请3个fpga, 可以不配置
-  --conf spark.worker.resourcesFile=/home/xxxx/tmp/gpu_fpga_conf.json #分配给该worker的gpu资源
-  ```
-
-  gpu_fpga_conf.json 文件如下所示
-
-  ``` json
-  [
-    {
-      "id": {
-        "componentName": "spark.worker",
-        "resourceName": "gpu"
-      },
-      "addresses": [
-        "0",
-        "1"
-      ]
+``` json
+[
+  {
+    "id": {
+      "componentName": "spark.worker",
+      "resourceName": "gpu"
     },
-    {
-      "id": {
-        "componentName": "spark.worker",
-        "resourceName": "fpga"
-      },
-      "addresses": [
-        "f1",
-        "f2",
-        "f3"
-      ]
-    }
-  ]
-  ```
-
-  上述的配置文件表明worker可用 `2个gpu(设备号为0, 1), ３个fpga（设备号为 f1 f2 f3)`
-2. 通过 discoverScript 自定义 resouce 发现脚本.
-
-  也可以通过 discoverScript 自动发现可用资源, 在 ${SPARK_HOME}/conf/spark-defaults.conf
-
-  ``` console
-  spark.worker.resource.gpu.amount 1
-  spark.worker.resource.gpu.discoveryScript ${SPARK_HOME/examples/src/main/scripts/getGpusResources.sh
-  ```
-
-  getGpusResources.sh 如下
-
-  ``` bash
-  # Example output: {"name": "gpu", "addresses":["0","1","2","3","4","5","6","7"]}
-
-  ADDRS=`nvidia-smi --query-gpu=index --format=csv,noheader | sed -e ':a' -e 'N' -e'$!ba' -e 's/\n/","/g'`
-  echo {\"name\": \"gpu\", \"addresses\":[\"$ADDRS\"]}
-  ```
-
-  *discoveryScript* 方式是通过 **ResourceDiscoveryScriptPlugin** 类启用一个进程去执行 *discoverScript* 脚本
-
-3. 另外也可以通过 Plugin 方式去发现资源
-
-  用户也可以自定义 `spark.resources.discoveryPlugin` 自定义发现资源的代码.
-
-下面通过代码来看下 Worker 是如何解析 resource 的
-
-Worker在启动的时候, `setupWorkerResources` 会解析相关的配置, 将资源信息保存到Worker的本地的`resources`变量中
-
-``` scala
-private def setupWorkerResources(): Unit = {
-  try {
-    resources = getOrDiscoverAllResources(conf, SPARK_WORKER_PREFIX, resourceFileOpt)
-    logResourceInfo(SPARK_WORKER_PREFIX, resources)
-  } catch {
-    ...
+    "addresses": [
+      "0",
+      "1"
+    ]
+  },
+  {
+    "id": {
+      "componentName": "spark.worker",
+      "resourceName": "fpga"
+    },
+    "addresses": [
+      "f1",
+      "f2",
+      "f3"
+    ]
   }
-  resources.keys.foreach { rName =>
-    resourcesUsed(rName) = MutableResourceInfo(rName, new HashSet[String])
-  }
-}
-
-def getOrDiscoverAllResources(
-    sparkConf: SparkConf,
-    componentName: String,
-    resourcesFileOpt: Option[String]): Map[String, ResourceInformation] = {
-  // 获得 spark.worker.resource.XXXX 相关的 resources request. 通常是在 spark configure 中配置的
-  // 比如 
-  // spark.worker.resource.gpu.amount 1              申请为该 worker 分配一个 GPU
-  // spark.worker.resource.gpu.discoveryScript xxx  发现 gpu 的脚本
-  // 此时会生成 ResourceRequest[id=spark.worker.gpu, amount=1, discoverScript=xxxx, vender=empty]
-  val requests = parseAllResourceRequests(sparkConf, componentName)
-  // 获得分配给 worker 的 resource. 
-  val allocations = parseAllocatedOrDiscoverResources(sparkConf, componentName, resourcesFileOpt)
-  // check allocated 给 worker 的资源是否与 request 匹配.
-  assertAllResourceAllocationsMeetRequests(allocations, requests)
-  val resourceInfoMap = allocations.map(a => (a.id.resourceName, a.toResourceInformation)).toMap
-  resourceInfoMap
-}
-
-private def parseAllocatedOrDiscoverResources(
-    sparkConf: SparkConf,
-    componentName: String,
-    resourcesFileOpt: Option[String]): Seq[ResourceAllocation] = {
-  // 从 resourcesFileOpt 中解析分配给该 worker 的 resource
-  val allocated = parseAllocated(resourcesFileOpt, componentName)
-  // 获得其它的非 resourceFileOpt 中指定的 resource 资源
-  val otherResourceIds = listResourceIds(sparkConf, componentName).diff(allocated.map(_.id))
-  // 比如定义了 discoverScript, 此时会触发 launch 新进程执行该脚本发现新资源.
-  val otherResources = otherResourceIds.flatMap { id =>
-    val request = parseResourceRequest(sparkConf, id)
-    if (request.amount > 0) {
-      Some(ResourceAllocation(id, discoverResource(sparkConf, request).addresses))
-    } else {
-      None
-    }
-  }
-  allocated ++ otherResources
-}
+]
 ```
+
+上述的配置文件表明worker可用 `2个gpu(设备号为0, 1), ３个fpga（设备号为 f1 f2 f3)`
+
+- discoverScript 脚本
+
+discoverScript 脚本方式自动发现可用资源, 在 ${SPARK_HOME}/conf/spark-defaults.conf
+
+``` console
+spark.worker.resource.gpu.amount 1
+spark.worker.resource.gpu.discoveryScript ${SPARK_HOME/examples/src/main/scripts/getGpusResources.sh
+```
+
+getGpusResources.sh 如下
+
+``` bash
+# Example output: {"name": "gpu", "addresses":["0","1","2","3","4","5","6","7"]}
+ADDRS=`nvidia-smi --query-gpu=index --format=csv,noheader | sed -e ':a' -e 'N' -e'$!ba' -e 's/\n/","/g'`
+echo {\"name\": \"gpu\", \"addresses\":[\"$ADDRS\"]}
+```
+
+*discoveryScript* 方式是通过 **ResourceDiscoveryScriptPlugin**　开启一个进程去执行 *discoverScript* 脚本
+
+- Plugin 方式去发现资源
+
+用户也可以自定义 `spark.resources.discoveryPlugin` 自定义发现资源的代码.
+
+> 那 Worker 的resource 到底是什么.
+
+Worker 的 `resources: Map[String, ResourceInformation]`　表示整个 worker resource.
 
 以 gpu_fpga_conf.json 为例, `resources` 的值如下所示
 
 ``` console
-gpu -> [name: gpu, addresses: 0,1]
-fpga -> [name: fpga, addresses: f1,f2,f3]
+gpu -> ResourceInformation(name=gpu, addresses=Seq(0,1))
+fpga -> ResourceInformation(name=fpga, addresses=Seq(f1,f2,f3)
 ```
 
 ### Application端配置
