@@ -36,7 +36,7 @@ Spark 支持 stage level scheduling, 对于不同的 stage, 所需求的 Resourc
 上图是整个 spark cluster 包括 driver 的 Resource 流程图.
 
 
-1. Step 1: Worker 配置 Resources
+### Step 1: Worker 配置 Resources
 
 Spark 在启动 worker 时是可以指定 Worker 的 cores/memory 以及 ResourceProfile file. 
 也可以通过环境变量比如 `SPARK_WORKER_CORES`, `SPARK_WORKER_MEMORY` 分别指定 Worker 的 cores/memory,
@@ -116,14 +116,20 @@ gpu -> ResourceInformation(name=gpu, addresses=Seq(0,1))
 fpga -> ResourceInformation(name=fpga, addresses=Seq(f1,f2,f3)
 ```
 
-### Application端配置
+### Step 2,3 Worker向Master注册
+
+Worker启动后开始向 Master 进行注册. Worker 的所有信息由 WorkerInfo 表示,　包括了 worker 可用的　cores/memory 以及 Resource 信息.
+
+### Step 4, 5 注册Application
+
+- Application端配置
 
 ``` console
 --conf spark.executor.resource.gpu.amount=1
 --conf spark.executor.resource.fpga.amount=2
 ```
 
-上面配置表示请求给 exeuctor 分配1个gpu, 2个fpga
+上面配置表示请求给 executor 分配1个gpu, 2个fpga
 
 ``` console
 --conf spark.task.resource.gpu.amount=1
@@ -141,31 +147,15 @@ spark.task.cores=1
 
 并发的 task = `min(12/1, 1/0.5) = 2`
 
-在StandaloneSchedulerBackend中, 在创建 ApplicationDesc 时，会将 `spark.executor.resource.XXXX` 相关配置解析为executorResourceReqs,
-也就是需要向worker申请executor的gpu/fpga资源
+上面的配置会在创建 SparkContext 时,　创建 ResourceManager 时解析, 并将相关信息保存到 default　的　ResourceProfile 中.
+最后将相关的信息一起打包发送到 Master registerApplication.
 
-此时`executorResourceReqs`结果为
+### Step 6, Master端在worker上分配资源
 
-``` java
-ResourceRequirement("fpga", 2)
-ResourceRequirement("gpu", 1)
-```
-
-``` scala
-val executorResourceReqs = ResourceUtils.parseResourceRequirements(conf,
-  config.SPARK_EXECUTOR_PREFIX) 
-//此时会将 spark.executor.resources.XXXX 配置解析成需要申请的executor的资源
-val appDesc = ApplicationDescription(sc.appName, maxCores, sc.executorMemory, command,
-  webUrl, sc.eventLogDir, sc.eventLogCodec, coresPerExecutor, initialExecutorLimit,
-  resourceReqsPerExecutor = executorResourceReqs)
-```
-
-### Master端在worker上分配资源
-
-Master 收到 Spark Application 注册信息后, 然后 Master 在已经注册的 Worker 中根据 Resource 等相关信息查找否能在该 Worker 上 launch Executor.
+Master 收到 Spark Application 注册信息后, 开始在已经注册的 Worker 中根据 ResourceProfile 相关信息查找否能在该 Worker 上 launch Executor.
 具体参照 `startExecutorsOnWorkers`, 分配的资源会放到 `ExecutorDesc` 中, 接着Master通知Worker启动相关的Executor进程.
 
-## Worker启动Executor
+### Step 7 Worker启动Executor
 
 ``` scala
 private def fetchAndRunExecutor() {
@@ -183,7 +173,7 @@ private def fetchAndRunExecutor() {
 }
 ```
 
-worker端将分配给executor的`resources` 资源保存**到worker节点的文件上**，当创建executor时，将该文件作为 `--resourcesFile executor.json` 传入executor当中
+worker端将分配给executor的`resources` 资源保存**到worker节点的Json文件上**，当创建executor时，将该文件作为 `--resourcesFile executor.json` 启动executor.
 
 `executor.json`如下所示, 可以看出资源名称已经变成 `spark.executor` 开头的了
 
@@ -211,7 +201,7 @@ worker端将分配给executor的`resources` 资源保存**到worker节点的文�
 ]
 ```
 
-## Executor端如何使用该resource
+### Step 8, 9 启动Executor
 
 在**CoarseGrainedExecutorBackend**中
 
@@ -228,21 +218,8 @@ override def onStart() {
 }
 ```
 
-``` scala
-// visible for testing
-def parseOrFindResources(resourcesFileOpt: Option[String]): Map[String,ResourceInformation] = {
-  // Executor端要解析出它所使用的资源，前提是要task申请才会解析
-    // 解析 resourcesFileOpt 分配给 executor 的资源,
-    // 解析 spark.executor.resources.XXX 开头的资源 request
-    // Check request 与 allocation 是否 match
-      val resources = getOrDiscoverAllResourcesForResourceProfile(
-        resourcesFileOpt,
-        SPARK_EXECUTOR_PREFIX,
-        resourceProfile,
-        env.conf)
-      resources
-}
-```
+Executor启动时,　首先解析 resourceFile 获得　Worker 分配给 Executor 的 resource 信息.
+
 
 resources = `(gpu,[name: gpu, addresses: 0])`, 将 gpu id=0 分配给该 Executor.
 
