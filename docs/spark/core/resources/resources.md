@@ -99,15 +99,15 @@ ADDRS=`nvidia-smi --query-gpu=index --format=csv,noheader | sed -e ':a' -e 'N' -
 echo {\"name\": \"gpu\", \"addresses\":[\"$ADDRS\"]}
 ```
 
-*discoveryScript* 方式是通过 **ResourceDiscoveryScriptPlugin**　开启一个进程去执行 *discoverScript* 脚本
+*discoveryScript* 方式是通过 **ResourceDiscoveryScriptPlugin** 开启一个进程去执行 *discoverScript* 脚本
 
-- Plugin 方式去发现资源
+- Plugin 发现资源
 
 用户也可以自定义 `spark.resources.discoveryPlugin` 自定义发现资源的代码.
 
 > 那 Worker 的resource 到底是什么.
 
-Worker 的 `resources: Map[String, ResourceInformation]`　表示整个 worker resource.
+Worker 的 `resources: Map[String, ResourceInformation]` 表示整个 worker resource.
 
 以 gpu_fpga_conf.json 为例, `resources` 的值如下所示
 
@@ -118,7 +118,7 @@ fpga -> ResourceInformation(name=fpga, addresses=Seq(f1,f2,f3)
 
 ### Step 2,3 Worker向Master注册
 
-Worker启动后开始向 Master 进行注册. Worker 的所有信息由 WorkerInfo 表示,　包括了 worker 可用的　cores/memory 以及 Resource 信息.
+Worker启动后开始向 Master 进行注册. Worker 的所有信息由 WorkerInfo 表示, 包括了 worker 可用的 cores/memory 以及 Resource 信息.
 
 ### Step 4, 5 注册Application
 
@@ -147,7 +147,7 @@ spark.task.cores=1
 
 并发的 task = `min(12/1, 1/0.5) = 2`
 
-上面的配置会在创建 SparkContext 时,　创建 ResourceManager 时解析, 并将相关信息保存到 default　的　ResourceProfile 中.
+上面的配置会在创建 SparkContext 时, 创建 ResourceManager 时解析, 并将相关信息保存到 default 的 ResourceProfile 中.
 最后将相关的信息一起打包发送到 Master registerApplication.
 
 ### Step 6, Master端在worker上分配资源
@@ -205,34 +205,38 @@ worker端将分配给executor的`resources` 资源保存**到worker节点的Json
 
 在**CoarseGrainedExecutorBackend**中
 
+CoarseGrainedExecutorBackend 启动时, 首先会根据 `--resourceProfileId` 获得  rpId, 然后从 driver 端获得 SparkAppConfig 信息, 包括 rpId 对应的 ResourceProfile.
+
+``` scala
+val cfg = driver.askSync[SparkAppConfig](RetrieveSparkAppConfig(arguments.resourceProfileId))
+```
+
 ```scala
 override def onStart() {
   logInfo("Connecting to driver: " + driverUrl)
   _resources = parseOrFindResources(resourcesFileOpt) //解析出资源文件
 
-  // 向 driver 注册 Executor 信息,包括 executor total cores 与 resources
+  // 向 driver 注册 Executor 信息,包括 executor cores 与 resources 以及由哪个 rpId 申请创建的 resourceProfile
   driver = Some(ref)
   ref.ask[Boolean](RegisterExecutor(executorId, self, hostname, cores, extractLogUrls,
-      extractAttributes, resources))
+        extractAttributes, _resources, resourceProfile.id))
   ...
 }
 ```
 
-Executor启动时,　首先解析 resourceFile 获得　Worker 分配给 Executor 的 resource 信息.
+接着进入 CoarseGrainedExecutorBackend 的 onStart 阶段. 首先解析 resourceFile 获得 Worker 分配给 Executor 的 resource 信息, 然后将 Worker 分配给 Executor 的资源信息包括 cores 的 Resource 向  driver 注册Executor.
 
+resources = `(gpu, ResourceInformation[name: gpu, addresses: 0])`, 将 gpu id=0 分配给该 Executor.
 
-resources = `(gpu,[name: gpu, addresses: 0])`, 将 gpu id=0 分配给该 Executor.
+### Step 12. Driver端接受Executor注册信息
 
-> 注意, `spark.executor.resource.gpu.discoveryScript` 在 spark standalone 上是没有用到的, 只在 YARN/K8S 上有用
-
-## Driver端接受Executor注册信息
-
-当DriverEndpoint收到RegisterExecutor消息后，生成ExecutorData，并放到executorDataMap中. 其中executor进程的资源信息也同时保存在了ExecutorData中了。
+当DriverEndpoint收到RegisterExecutor消息后，生成ExecutorData，并放到executorDataMap中. executor的资源信息也同时保存在了ExecutorData中了。
 
 ``` scala
 val data = new ExecutorData(executorRef, executorAddress, hostname,
-      cores, cores, logUrlHandler.applyPattern(logUrls, attributes), attributes,
-      resourcesInfo)
+            0, cores, logUrlHandler.applyPattern(logUrls, attributes), attributes,
+            resourcesInfo, resourceProfileId, registrationTs = System.currentTimeMillis(),
+            requestTs = reqTs)
 
 CoarseGrainedSchedulerBackend.this.synchronized {
   executorDataMap.put(executorId, data)
@@ -242,101 +246,11 @@ CoarseGrainedSchedulerBackend.this.synchronized {
 
 通过上面的几个模块的部署，Executor上可用资源信息已经保存到Driver上了，此时Driver可以通过TaskSchedulerImpl去调度Task了
 
-## Driver调度Task
+### Step 13. Driver调度Task
 
-如图中`step 12`开始就是Driver来调度Task, 其中 `resourceOffers` 会根据注册给Driver的可用Executor信息来找出合适的Executor运行Task.
+`resourceOffers` 将 executor 的 resource 以 round-robin way offer 给 task. 为每个 Task 生成 TaskDescription, 里面包含有 Task 的 Resource 信息.
 
-resourceOffers 会调用 resourceOfferSingleTaskSet
-
-``` scala
-//只有同时满足可用cpu core与 resource满足task请求的情况下，则该executor才算available
-val taskResAssignmentsOpt = resourcesMeetTaskRequirements(taskSet, availableCpus(i),
-          availableResources(i))
- 
-private def resourcesMeetTaskRequirements(
-    taskSet: TaskSetManager,
-    availCpus: Int,
-    availWorkerResources: Map[String, Buffer[String]]
-    ): Option[Map[String, ResourceInformation]] = {
-  val rpId = taskSet.taskSet.resourceProfileId
-  val taskSetProf = sc.resourceProfileManager.resourceProfileFromId(rpId)
-  val taskCpus = ResourceProfile.getTaskCpusOrDefaultForProfile(taskSetProf, conf)
-  // check if the ResourceProfile has cpus first since that is common case
-  if (availCpus < taskCpus) return None //是否有足够可用 cpu
-  // only look at the resource other then cpus
-  // 获得 task resources request,  也就是   spark.tasks.resource.XXX
-  val tsResources = ResourceProfile.getCustomTaskResources(taskSetProf)
-  if (tsResources.isEmpty) return Some(Map.empty)
-  val localTaskReqAssign = HashMap[String, ResourceInformation]()
-  // we go through all resources here so that we can make sure they match and also get what the
-  // assignments are for the next task
-  for ((rName, taskReqs) <- tsResources) {
-    val taskAmount = taskSetProf.getSchedulerTaskResourceAmount(rName)
-    // availableResources 是一个  buffer,    buffer.size  表示可以同时跑多少个 task
-    availWorkerResources.get(rName) match {
-      case Some(workerRes) =>
-        if (workerRes.size >= taskAmount) {
-          localTaskReqAssign.put(rName, new ResourceInformation(rName,
-            workerRes.take(taskAmount).toArray)) //在 buffer 中预分配 taskAmount 个. 一般只有一个
-        } else {
-          return None
-        }
-      case None => return None
-    }
-  }
-  Some(localTaskReqAssign.toMap)
-}
-```
-
-上面这个阶段是预分配
-
-真正分配Task Resource是在launchTasks中
-
-``` scala
-private def launchTasks(tasks: Seq[Seq[TaskDescription]]): Unit = {
-  for (task <- tasks.flatten) {
-    val serializedTask = TaskDescription.encode(task)
-    if (serializedTask.limit() >= maxRpcMessageSize) {
-      ...
-    }
-    else {
-      val executorData = executorDataMap(task.executorId) //获得 executor 资源
-      // Do resources allocation here. The allocated resources will get released after the task
-      // finishes.
-      val rpId = executorData.resourceProfileId
-      val prof = scheduler.sc.resourceProfileManager.resourceProfileFromId(rpId)
-      val taskCpus = ResourceProfile.getTaskCpusOrDefaultForProfile(prof, conf) // 获得 task.cores.
-      executorData.freeCores -= taskCpus //更新  executor 可用 cores
-      task.resources.foreach { case (rName, rInfo) =>
-        assert(executorData.resourcesInfo.contains(rName))
-        // 更新 addressAvailabilityMap  中 gpu-id 对应的计数.
-        executorData.resourcesInfo(rName).acquire(rInfo.addresses)
-      }
-      logDebug(s"Launching task ${task.taskId} on executor id: ${task.executorId} hostname: " +
-        s"${executorData.executorHost}.")
-      executorData.executorEndpoint.send(LaunchTask(new SerializableBuffer(serializedTask)))
-    }
-  }
-}
-
-def acquire(addrs: Seq[String]): Unit = {
-  // addrs: gpu id
-  addrs.foreach { address =>
-     // addressAvailabilityMap 表示 gpuId -> numParts 的映射, 比如 task.amount=0.08, 则 numParts=12,即允许 12个task同时运行
-    if (!addressAvailabilityMap.contains(address)) {
-      throw new SparkException(s"Try to acquire an address that doesn't exist. $resourceName " +
-        s"address $address doesn't exist.")
-    }
-    val isAvailable = addressAvailabilityMap(address)
-    if (isAvailable > 0) {
-      addressAvailabilityMap(address) = addressAvailabilityMap(address) - 1 //减去1
-    } else {
-    }
-  }
-}
-```
-
-## Executor端处理Resource
+### Step 14. Task 获得 Resource 信息.
 
 TaskRunner.run 会触发 Task.run
 
@@ -363,11 +277,11 @@ TaskContext.setTaskContext(context) //保存TaskContextImpl,可以通过TaskCont
 runTask(context)
 ```
 
-通过上面的代码可知，Executor将resource保存到TaskContextImpl中，而该变量可以直接通过`TaskContext.get`取得，第一节代码中就是这样使用的
+通过上面的代码可知，Executor将 TaskDescription 的 resource 信息保存到TaskContextImpl中，而该变量可以直接通过`TaskContext.get`取得，第一节代码中就是这样使用的
 
 当Task执行完成后，Executor会通过StatusUpdate返回给Driver Task执行后的结果.
 
-## Driver端释放resource
+### Driver端释放resource
 
 DriverPoint在接收到 StatusUpdate后, 将Task占用Executor资源释放给Executor,这样该Executor可以去调度基它Task了。
 
@@ -385,10 +299,5 @@ case StatusUpdate(executorId, taskId, state, data, resources) =>
           }
         }
         makeOffers(executorId)
-      case None =>
-        // Ignoring the update since we don't know about the executor.
-        logWarning(s"Ignored task status update ($taskId state $state) " +
-          s"from unknown executor with ID $executorId")
-    }
   }
 ```
