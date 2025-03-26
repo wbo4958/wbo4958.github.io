@@ -1,11 +1,12 @@
 ---
 layout: page
-title: connect
-nav_order: 300
-parent: spark 
+title: Spark Connect Overview
+nav_order: 20
+parent: connect
+grand_parent: spark
 ---
 
-# Spark Connect
+# Spark Connect overview
 
 本文基于 spark3.4.0 学习 spark connect.
 
@@ -64,7 +65,7 @@ Spark Connect Client 将用户的 Sql 请求通过 Grpc 传递给 Spark Connect 
 
 下面是流程图
 
-![connect](/docs/spark/connect/spark-connect.drawio.svg)
+![connect](/docs/spark/connect/overview/spark-connect.drawio.svg)
 
 如上图所示, 整个流程图大致可分为下面以下 steps
 
@@ -110,4 +111,3 @@ SparkConnectStreamHandler 首先要做的一点是为该 user/sessionId 创建�
 - 10 返回结果
 
 spark cluster 处理完结果后, 将 Arrow 格式的数据返回给 client 端.
-- 
