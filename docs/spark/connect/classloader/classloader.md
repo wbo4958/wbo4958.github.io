@@ -59,3 +59,24 @@ sessionHolder.withSession { session =>
 
 ## Executor 端的 ClassLoader
 
+![executor-classloader](/docs/spark/connect/classloader/spark-connect-executor-classloader.drawio.svg)
+
+Executor 端也分 Session, 默认为 default Session, Executor 在启动的时会初始化 default session, fetch 通过 --jars 指定 global jars, 并加入到 default session 的 classloader 的 classpath 中. 并且 plugin 的初始化也是用的 default session 的 classloader. 与 default session 相对应的 session-specific,
+
+当有 Tasks 需要在 Executor 端运行时，会为这些 Task 生成一个 Isolation session, 这些 Isolation session 会从 driver fetch session-specific 相关的 artifacts, 如果是 jar 的话，会将该　jar 加入到 session-specific 的 classloader 中，并立即将当前 task 运行的线程设置为 session-specific 的 classloader.
+这样后面在反序列化 task 时就会使用 session-specific classloader.
+
+``` scala
+updateDependencies(
+  taskDescription.artifacts.files,
+  taskDescription.artifacts.jars,
+  taskDescription.artifacts.archives,
+  isolatedSession)
+// Always reset the thread class loader to ensure if any updates, all threads (not only
+// the thread that updated the dependencies) can update to the new class loader.
+Thread.currentThread.setContextClassLoader(isolatedSession.replClassLoader)
+task = ser.deserialize[Task[Any]](
+  taskDescription.serializedTask, Thread.currentThread.getContextClassLoader)
+```
+
+对于 classic spark, 默认用的是 default session. 不会创建另外的 session.
