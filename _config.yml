@@ -55,3 +55,11 @@ gh_edit_repository: "https://github.com/wbo4958/wbo4958.github.io" # the github 
 gh_edit_branch: "master" # the branch that your docs is served from
 # gh_edit_source: docs # the source that your files originate from
 gh_edit_view_mode: "tree" # "tree" or "edit" if you want the user to jump into the editor immediately
+
++mermaid:
+  # Version of mermaid library
+  # Pick an available version from https://cdn.jsdelivr.net/npm/mermaid/
+  version: "11.8.0"
+  ##### Local library
+  ### wget -r https://cdn.jsdelivr.net/npm/mermaid@11.8.0/dist/
+  #path: /assets/js/mermaid-11.8.0/mermaid.esm.min.mjs
