@@ -32,6 +32,5 @@ MERMAID_VERSION="11.12.2"
 
 mkdir -p assets/js/mermaid-${MERMAID_VERSION}
 
-cd assets/js/mermaid-${MERMAID_VERSION}
-wget https://cdn.jsdelivr.net/npm/mermaid@${MERMAID_VERSION}/dist/mermaid.esm.min.mjs
-cd -
+pushd assets/js/mermaid-${MERMAID_VERSION}
+wget -r -np https://cdn.jsdelivr.net/npm/mermaid@${MERMAID_VERSION}/dist
