@@ -8,7 +8,7 @@ grand_parent: spark
 
 # Spark Connect Session Timeout 机制详解
 
-本文基于 Spark 4.0 学习 Spark Connect 的 Session Timeout 机制。
+本文基于 Spark 4.1 学习 Spark Connect 的 Session Timeout 机制。Coauthored with `claude-4.5-opus-high`.
 
 ## 目录
 {: .no_toc .text-delta}
@@ -236,6 +236,133 @@ flowchart LR
     style E fill:#cfc,stroke:#333,stroke-width:2px
 ```
 
+### PySpark 客户端如何触发 ReattachExecute
+
+PySpark 客户端通过 `ExecutePlanResponseReattachableIterator` 类（位于 `pyspark/sql/connect/client/reattach.py`）自动处理重连逻辑。
+
+#### 核心流程
+
+```mermaid
+sequenceDiagram
+    participant App as PySpark Application
+    participant Iterator as ExecutePlanResponseReattachableIterator
+    participant Stub as gRPC Stub
+    participant Server as Spark Connect Server
+
+    App->>Iterator: 遍历结果 (next())
+    Iterator->>Iterator: _has_next()
+    Iterator->>Iterator: _call_iter()
+    
+    alt 首次请求
+        Iterator->>Stub: ExecutePlan(request)
+        Stub->>Server: gRPC ExecutePlan
+        Server-->>Stub: Response stream
+    end
+    
+    loop 消费结果
+        Iterator->>Iterator: next(iterator)
+        Iterator-->>App: 返回一条结果
+    end
+    
+    Note over Server: senderMaxStreamDuration 超时
+    Server-->>Stub: 关闭流（无 ResultComplete）
+    Stub-->>Iterator: StopIteration
+    
+    Iterator->>Iterator: 检测到流结束但无 ResultComplete
+    Iterator->>Iterator: self._iterator = None
+    Iterator->>Iterator: _call_iter() 再次调用
+    
+    alt iterator 为 None
+        Iterator->>Stub: ReattachExecute(request)
+        Stub->>Server: gRPC ReattachExecute
+        Note over Server: updateAccessTime()
+        Server-->>Stub: 新的 Response stream
+    end
+    
+    Iterator-->>App: 继续返回结果
+```
+
+#### 关键代码解析
+
+**1. 检测流结束并触发重连**
+
+当 gRPC 流结束但没有收到 `ResultComplete` 消息时，客户端知道还有更多数据，需要重连：
+
+```python
+# pyspark/sql/connect/client/reattach.py - _has_next() 方法
+# Graceful reattach:
+# If iterator ended, but there was no ResponseComplete, it means that
+# there is more, and we need to reattach.
+if not self._result_complete and not has_next:
+    while not has_next:
+        # unset iterator for new ReattachExecute to be called in _call_iter
+        self._iterator = None
+        self._current = self._call_iter(lambda: next(self._iterator))
+        has_next = self._current is not None
+```
+
+**2. 发送 ReattachExecute 请求**
+
+当 `_iterator` 为 `None` 时，`_call_iter` 方法会自动调用 `ReattachExecute`：
+
+```python
+# pyspark/sql/connect/client/reattach.py - _call_iter() 方法
+def _call_iter(self, iter_fun: Callable) -> Any:
+    if self._iterator is None:
+        # we get a new iterator with ReattachExecute if it was unset.
+        self._iterator = iter(
+            self._stub.ReattachExecute(
+                self._create_reattach_execute_request(), metadata=self._metadata
+            )
+        )
+    # ...
+```
+
+**3. 构建 ReattachExecute 请求**
+
+请求包含 `session_id`、`operation_id` 和上次处理的 `response_id`：
+
+```python
+# pyspark/sql/connect/client/reattach.py - _create_reattach_execute_request() 方法
+def _create_reattach_execute_request(self) -> pb2.ReattachExecuteRequest:
+    reattach = pb2.ReattachExecuteRequest(
+        session_id=self._initial_request.session_id,
+        user_context=self._initial_request.user_context,
+        operation_id=self._initial_request.operation_id,
+    )
+    if self._last_returned_response_id:
+        reattach.last_response_id = self._last_returned_response_id
+    return reattach
+```
+
+#### 为什么这能保持 Session 活跃？
+
+在服务端，`ReattachExecute` 请求由 `SparkConnectReattachExecuteHandler` 处理：
+
+```scala
+// SparkConnectReattachExecuteHandler.scala
+def handle(v: proto.ReattachExecuteRequest): Unit = {
+  val sessionHolder = SparkConnectService.sessionManager
+    .getIsolatedSession(  // 这里会触发 updateAccessTime()
+      SessionKey(v.getUserContext.getUserId, v.getSessionId),
+      previousSessionId)
+  // ...
+}
+```
+
+`getIsolatedSession` 内部调用 `getSession`，其中会更新访问时间：
+
+```scala
+// SparkConnectSessionManager.scala
+private def getSession(...): SessionHolder = {
+  // ...
+  if (session != null) {
+    session.updateAccessTime()  // 关键：更新 lastAccessTimeMs
+  }
+  session
+}
+```
+
 ### 何时仍可能出现 Session Timeout？
 
 即使有 Reattachable Execution 保护，以下场景仍可能触发 Session Timeout：
@@ -345,47 +472,6 @@ private def getSession(key: SessionKey, default: Option[() => SessionHolder]): S
   }
   session
 }
-```
-
-## 配置调整建议
-
-### 调整 senderMaxStreamDuration
-
-如果网络环境不稳定，可以调整重连间隔：
-
-```bash
-# 更频繁的重连（网络不稳定时）
-./sbin/start-connect-server.sh \
-  --conf spark.connect.execute.reattachable.senderMaxStreamDuration=1m
-
-# 较少的重连（稳定网络）
-./sbin/start-connect-server.sh \
-  --conf spark.connect.execute.reattachable.senderMaxStreamDuration=5m
-```
-
-**注意**: `senderMaxStreamDuration` 必须小于 `defaultSessionTimeout`，否则在重连之前 Session 可能已经超时。
-
-### 调整 Session 超时时间
-
-对于查询完成后可能有长时间空闲的场景：
-
-```bash
-# 增加空闲超时时间
-./sbin/start-connect-server.sh \
-  --conf spark.connect.session.manager.defaultSessionTimeout=3h
-
-# 或者永不超时
-./sbin/start-connect-server.sh \
-  --conf spark.connect.session.manager.defaultSessionTimeout=-1
-```
-
-### 设置自定义 Session 超时
-
-可以通过 `SessionHolder.setCustomInactiveTimeoutMs()` 方法为单个 Session 设置自定义超时：
-
-```scala
-sessionHolder.setCustomInactiveTimeoutMs(Some(3 * 60 * 60 * 1000L))  // 3 小时
-sessionHolder.setCustomInactiveTimeoutMs(Some(-1L))  // 永不超时
 ```
 
 ## 配置关系总结
