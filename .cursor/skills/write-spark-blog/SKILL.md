@@ -86,7 +86,8 @@ The goal is to help readers understand Spark internals at an architectural level
 - Key class names and their responsibilities
 - Important method signatures and their roles
 - Configuration parameters that affect behavior
-- Simple, runnable examples that demonstrate the concept
+- Simple, runnable **Python (PySpark)** examples that demonstrate the concept
+- When diving into JVM internals, use Scala source code but always start from the Python API entry point
 
 ### What to Exclude by Topic
 
@@ -160,40 +161,76 @@ Color palette for consistency:
 
 ## Code Snippets
 
+### Example Language Preference
+
+- **Prefer Python examples** over Scala for all runnable sample code and API demonstrations
+- Use PySpark (`from pyspark.sql import SparkSession`) as the default entry point
+- Only use Scala when showing JVM-side Spark source code internals (e.g., Catalyst expressions, physical plans)
+
+Example — prefer this:
+
+````markdown
+```python
+from pyspark.sql import SparkSession
+
+spark = SparkSession.builder.appName("demo").getOrCreate()
+df = spark.createDataFrame([(1, "Alice"), (2, "Bob")], ["id", "name"])
+df.filter(df.id > 1).show()
+```
+````
+
+Over this:
+
+````markdown
+```scala
+val df = spark.createDataFrame(Seq((1, "Alice"), (2, "Bob"))).toDF("id", "name")
+df.filter($"id" > 1).show()
+```
+````
+
 ### Source Code References
 
 Always mention the source file path before code blocks:
 
 ```markdown
-**源码**: `spark/core/src/main/scala/org/apache/spark/api/python/PythonRDD.scala`
+**源码**: `spark/python/pyspark/sql/dataframe.py`
+```
+
+or for JVM internals:
+
+```markdown
+**源码**: `spark/sql/core/src/main/scala/org/apache/spark/sql/execution/WholeStageCodegenExec.scala`
 ```
 
 Then include the relevant code snippet:
 
 ````markdown
-```scala
-override def compute(split: Partition, context: TaskContext): Iterator[Array[Byte]] = {
-  val runner = PythonRunner(func, jobArtifactUUID)
-  runner.compute(firstParent.iterator(split, context), split.index, context)
-}
+```python
+def filter(self, condition):
+    if isinstance(condition, str):
+        jdf = self._jdf.filter(condition)
+    else:
+        jdf = self._jdf.filter(condition._jc)
+    return DataFrame(jdf, self.sparkSession)
 ```
 ````
 
 ### Code Snippet Rules
 
 - Use inline fenced code blocks only (no `{% include %}` or external file references)
-- Language tags: `scala`, `python`, `java`, `json`, `xml`, `bash`, `console`
+- Language tags: `python`, `scala`, `java`, `json`, `xml`, `bash`, `console`
+- **Python first**: use `python` for all user-facing examples and PySpark source code
+- **Scala only** for JVM-side Spark internals that have no Python equivalent
 - Read the actual source code from `spark/` directory — do NOT fabricate or guess code
 - Simplify code for clarity: remove logging, metrics, error handling boilerplate when it doesn't aid understanding
 - Add brief Chinese comments to highlight key lines when helpful
 - Show call stacks as indented text blocks when tracing execution flow:
 
 ```
-Executor.launchTask()
-  └─> TaskRunner.run()
-      └─> Task.run()
-          └─> RDD.iterator()
-              └─> PythonRDD.compute()
+DataFrame.filter()                          # Python
+  └─> DataFrame.filter()                   # JVM (Dataset.scala)
+      └─> Dataset.withPlan()
+          └─> Filter(condition, logicalPlan)  # Catalyst LogicalPlan
 ```
 
 ## Tables
@@ -223,13 +260,44 @@ Use markdown tables for:
 
 ## Example-Driven Explanation
 
-Every blog post should start with a **simple, runnable example** that demonstrates the feature being discussed. Then trace through the internals step by step, showing how Spark processes that example.
+Every blog post should start with a **simple, runnable Python example** that demonstrates the feature being discussed. Then trace through the internals step by step, showing how Spark processes that example.
 
 Pattern:
-1. Show the example code
+1. Show the example code in **Python** (PySpark)
 2. Say "这段简单的代码背后隐藏着... 让我们深入探究。" or similar
 3. Show the high-level overview diagram
 4. Deep dive into each step with source code and diagrams
+5. When tracing into JVM internals, switch to Scala source code with clear annotation
+
+Example flow:
+
+````markdown
+```python
+# 用户代码 (Python)
+from pyspark.sql import SparkSession
+
+spark = SparkSession.builder.getOrCreate()
+df = spark.createDataFrame([(1,), (2,), (3,)], ["value"])
+result = df.filter("value > 1").collect()
+```
+
+这段简单的代码背后，Spark 经历了从 Python API 到 Catalyst 优化再到物理执行的完整流程。让我们深入探究。
+
+**Python 端入口** — 源码: `spark/python/pyspark/sql/dataframe.py`
+
+```python
+def filter(self, condition):
+    ...
+```
+
+**JVM 端处理** — 源码: `spark/sql/core/src/main/scala/org/apache/spark/sql/Dataset.scala`
+
+```scala
+def filter(condition: Column): Dataset[Row] = {
+  ...
+}
+```
+````
 
 ## File Organization
 
