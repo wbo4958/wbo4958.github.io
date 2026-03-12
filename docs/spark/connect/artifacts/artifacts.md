@@ -36,24 +36,29 @@ Spark Connect 通过两个核心 gRPC API 实现了这一需求：
 
 ## 示例代码
 
-以 Scala 客户端为例，向 Spark Connect 会话添加 Artifact 非常简单：
+以 PySpark 客户端为例，向 Spark Connect 会话添加 Artifact 非常简单：
 
-```scala
-val spark = SparkSession.builder()
-  .remote("sc://localhost:15002")
-  .getOrCreate()
+```python
+from pyspark.sql import SparkSession
 
-// 添加 JAR
+spark = SparkSession.builder \
+    .remote("sc://localhost:15002") \
+    .getOrCreate()
+
+# 添加 JAR
 spark.addArtifact("/path/to/my-udf.jar")
 
-// 添加 class 文件
-spark.addArtifact(bytesOfClass, "com/example/MyUDF.class")
+# 添加 Python 文件
+spark.addArtifact("/path/to/my_module.py", pyfile=True)
 
-// 添加 Maven 依赖（Ivy 协议）
-spark.addArtifact(new URI("ivy://org.example:my-lib:1.0"))
+# 添加归档文件
+spark.addArtifact("/path/to/data.tar.gz", archive=True)
 
-// 缓存 in-memory blob（如序列化后的 UDF）
-val hash = spark.client.artifactManager.cacheArtifact(serializedUdfBytes)
+# 添加普通文件
+spark.addArtifact("/path/to/config.json", file=True)
+
+# 缓存 in-memory blob（如序列化后的 UDF）
+hash = spark.client._artifact_manager.cache_artifact(serialized_udf_bytes)
 ```
 
 这段简单的代码背后涉及 gRPC 流式传输、分块协议、CRC 校验、服务端 Artifact 存储和 ClassLoader 管理等一系列复杂机制。让我们深入探究。
@@ -208,38 +213,54 @@ message ArtifactStatusesResponse {
 
 客户端将不同类型的 Artifact 映射为带前缀的路径名：
 
-**源码**: `spark/sql/api/src/main/scala/org/apache/spark/sql/Artifact.scala`
+**源码**: `spark/python/pyspark/sql/connect/client/artifact.py`
 
-```scala
-object Artifact {
-  val CLASS_PREFIX: Path = Paths.get("classes")
-  val JAR_PREFIX: Path = Paths.get("jars")
-  val CACHE_PREFIX: Path = Paths.get("cache")
-}
+```python
+JAR_PREFIX: str = "jars"
+PYFILE_PREFIX: str = "pyfiles"
+ARCHIVE_PREFIX: str = "archives"
+FILE_PREFIX: str = "files"
+FORWARD_TO_FS_PREFIX: str = "forward_to_fs"
+CACHE_PREFIX: str = "cache"
 ```
 
 | 类型 | 路径前缀 | 示例 | 场景 |
 |------|---------|------|------|
 | JAR | `jars/` | `jars/my-udf.jar` | 用户 JAR 包 |
-| Class | `classes/` | `classes/com/example/Foo.class` | REPL 动态编译的类 |
-| Cache | `cache/` | `cache/a1b2c3d4...` | 序列化 UDF 等二进制数据 |
-| PyFile | `pyfiles/` | `pyfiles/my_module.zip` | Python 文件（Python 客户端） |
-| Archive | `archives/` | `archives/data.tar.gz` | 归档文件 |
+| PyFile | `pyfiles/` | `pyfiles/my_module.py` | Python 文件（`.py`, `.zip`, `.egg`, `.jar`） |
+| Archive | `archives/` | `archives/data.tar.gz` | 归档文件（`.zip`, `.tar.gz`, `.tgz`, `.tar`） |
 | File | `files/` | `files/config.json` | 普通文件 |
+| Cache | `cache/` | `cache/a1b2c3d4...` | 序列化 UDF 等二进制数据 |
+
+PySpark 客户端通过 `SparkSession.addArtifact()` 的 `pyfile`、`archive`、`file` 参数来指定 Artifact 类型：
+
+```python
+def addArtifacts(
+    self, *path: str,
+    pyfile: bool = False, archive: bool = False, file: bool = False
+) -> None:
+```
 
 每个 `Artifact` 对象包含一个**相对路径**（`path`）和一个**本地数据源**（`LocalData`），后者可以是本地文件（`LocalFile`）或内存数据（`InMemory`）。
+
+```python
+class Artifact:
+    def __init__(self, path: str, storage: LocalData):
+        assert not Path(path).is_absolute(), f"Bad path: {path}"
+        self.path = path
+        self.storage = storage
+```
 
 ### 分块传输策略
 
 客户端 `ArtifactManager` 采用**智能分块策略**来高效传输 Artifact。每个 chunk 的大小为 **32 KB**，这是 gRPC 推荐的消息体大小。
 
-**源码**: `spark/sql/connect/common/src/main/scala/org/apache/spark/sql/connect/client/ArtifactManager.scala`
+**源码**: `spark/python/pyspark/sql/connect/client/artifact.py`
 
-```scala
-class ArtifactManager(...) {
-  // 遵循 gRPC 推荐的 32KB chunk 大小
-  private val CHUNK_SIZE: Int = 32 * 1024
-}
+```python
+class ArtifactManager:
+    # 遵循 gRPC 推荐的 32KB chunk 大小
+    CHUNK_SIZE: int = 32 * 1024
 ```
 
 传输策略分为两种：
@@ -276,85 +297,98 @@ flowchart TB
     style Complete fill:#e1ffe1
 ```
 
-核心实现在 `addArtifactsImpl` 方法中：
+核心实现在 `_add_artifacts` 方法中：
 
-```scala
-private[client] def addArtifactsImpl(artifacts: Iterable[Artifact]): Unit = {
-  val promise = Promise[Seq[ArtifactSummary]]()
-  val responseHandler = new StreamObserver[proto.AddArtifactsResponse] { ... }
-  val stream = stub.addArtifacts(responseHandler)
-  val currentBatch = mutable.Buffer.empty[Artifact]
-  var currentBatchSize = 0L
+```python
+def _add_artifacts(self, artifacts: Iterable[Artifact]) -> Iterator[proto.AddArtifactsRequest]:
+    current_batch: List[Artifact] = []
+    current_batch_size = 0
 
-  artifacts.iterator.foreach { artifact =>
-    val size = artifact.storage.size
-    if (size > CHUNK_SIZE) {
-      // 大文件：先刷新 batch，再分块传输
-      if (currentBatch.nonEmpty) { writeBatch() }
-      addChunkedArtifact(artifact, stream)
-    } else {
-      // 小文件：累积到 batch
-      if (currentBatchSize + size > CHUNK_SIZE) { writeBatch() }
-      addToBatch(artifact, size)
-    }
-  }
-  if (currentBatch.nonEmpty) { writeBatch() }
-  stream.onCompleted()
-  SparkThreadUtils.awaitResultNoSparkExceptionConversion(promise.future, Duration.Inf)
-}
+    for artifact in artifacts:
+        data = artifact.storage
+        size = data.size
+        if size > ArtifactManager.CHUNK_SIZE:
+            # 大文件：先刷新 batch，再分块传输
+            if len(current_batch) > 0:
+                yield from write_batch()
+            yield from self._add_chunked_artifact(artifact)
+        else:
+            # 小文件：累积到 batch
+            if current_batch_size + size > ArtifactManager.CHUNK_SIZE:
+                yield from write_batch()
+            add_to_batch(artifact, size)
+
+    if len(current_batch) > 0:
+        yield from write_batch()
 ```
+
+Python 客户端使用**生成器（generator）**产出 `AddArtifactsRequest`，gRPC 会消费这个迭代器进行流式发送。
 
 ### Batch 模式（小文件）
 
 多个小文件（每个 <= 32KB）被打包到一个 `AddArtifactsRequest.Batch` 中一次发送，减少 RPC 次数：
 
-```scala
-private def addBatchedArtifacts(
-    artifacts: Seq[Artifact],
-    stream: StreamObserver[proto.AddArtifactsRequest]): Unit = {
-  val builder = proto.AddArtifactsRequest.newBuilder()
-    .setSessionId(sessionId)
-  artifacts.foreach { artifact =>
-    val in = new CheckedInputStream(artifact.storage.stream, new CRC32)
-    val data = proto.AddArtifactsRequest.ArtifactChunk.newBuilder()
-      .setData(ByteString.readFrom(in))
-      .setCrc(in.getChecksum.getValue)  // 每个 artifact 计算 CRC32
-    builder.getBatchBuilder.addArtifactsBuilder()
-      .setName(artifact.path.toString)
-      .setData(data)
-  }
-  stream.onNext(builder.build())
-}
+```python
+def _add_batched_artifacts(
+    self, artifacts: Iterable[Artifact]
+) -> Iterator[proto.AddArtifactsRequest]:
+    artifact_chunks = []
+
+    for artifact in artifacts:
+        with artifact.storage.stream() as stream:
+            binary = stream.read()
+        crc32 = zlib.crc32(binary)  # 每个 artifact 计算 CRC32
+        data = proto.AddArtifactsRequest.ArtifactChunk(data=binary, crc=crc32)
+        artifact_chunks.append(
+            proto.AddArtifactsRequest.SingleChunkArtifact(
+                name=artifact.path, data=data)
+        )
+
+    yield proto.AddArtifactsRequest(
+        session_id=self._session_id,
+        user_context=self._user_context,
+        batch=proto.AddArtifactsRequest.Batch(artifacts=artifact_chunks),
+    )
 ```
 
 ### Chunked 模式（大文件）
 
 大文件（> 32KB）被拆分为多个 chunk，分多次 RPC 发送：
 
-```scala
-private def addChunkedArtifact(
-    artifact: Artifact,
-    stream: StreamObserver[proto.AddArtifactsRequest]): Unit = {
-  val in = new CheckedInputStream(artifact.storage.stream, new CRC32)
+```python
+def _add_chunked_artifact(self, artifact: Artifact) -> Iterator[proto.AddArtifactsRequest]:
+    initial_batch = True
+    get_num_chunks = int(
+        (artifact.size + (ArtifactManager.CHUNK_SIZE - 1)) / ArtifactManager.CHUNK_SIZE
+    )
 
-  // 第一个请求：BeginChunkedArtifact（包含元信息 + 首个 chunk）
-  var dataChunk = readNextChunk(in)
-  builder.getBeginChunkBuilder
-    .setName(artifact.path.toString)
-    .setTotalBytes(artifact.size)
-    .setNumChunks(getNumChunks(artifact.size))
-    .setInitialChunk(artifactChunkBuilder.setData(dataChunk).setCrc(...))
-  stream.onNext(builder.build())
-
-  // 后续请求：只包含 ArtifactChunk 数据
-  dataChunk = readNextChunk(in)
-  while (!dataChunk.isEmpty) {
-    builder.setChunk(artifactChunkBuilder.setData(dataChunk).setCrc(...))
-    stream.onNext(builder.build())
-    dataChunk = readNextChunk(in)
-  }
-}
+    with artifact.storage.stream() as stream:
+        for chunk in iter(lambda: stream.read(ArtifactManager.CHUNK_SIZE), b""):
+            if initial_batch:
+                # 第一个请求：BeginChunkedArtifact（包含元信息 + 首个 chunk）
+                yield proto.AddArtifactsRequest(
+                    session_id=self._session_id,
+                    user_context=self._user_context,
+                    begin_chunk=proto.AddArtifactsRequest.BeginChunkedArtifact(
+                        name=artifact.path,
+                        total_bytes=artifact.size,
+                        num_chunks=get_num_chunks,
+                        initial_chunk=proto.AddArtifactsRequest.ArtifactChunk(
+                            data=chunk, crc=zlib.crc32(chunk)),
+                    ),
+                )
+                initial_batch = False
+            else:
+                # 后续请求：只包含 ArtifactChunk 数据
+                yield proto.AddArtifactsRequest(
+                    session_id=self._session_id,
+                    user_context=self._user_context,
+                    chunk=proto.AddArtifactsRequest.ArtifactChunk(
+                        data=chunk, crc=zlib.crc32(chunk)),
+                )
 ```
+
+Python 使用 `iter(lambda: stream.read(CHUNK_SIZE), b"")` 这个惯用写法来逐块读取文件，直到读完为止。CRC 使用 `zlib.crc32()` 计算。
 
 整个传输过程示意：
 
@@ -639,7 +673,7 @@ def withResources[T](f: => T): T = withClassLoaderIfNeeded {
 
 ### 客户端：先查后传
 
-**源码**: `spark/sql/connect/common/src/main/scala/org/apache/spark/sql/connect/client/ArtifactManager.scala`
+**源码**: `spark/python/pyspark/sql/connect/client/artifact.py`
 
 ```mermaid
 flowchart LR
@@ -666,56 +700,54 @@ flowchart LR
 
 单个 Artifact 的缓存逻辑：
 
-```scala
-def cacheArtifact(blob: Array[Byte]): String = {
-  val hash = sha256Hex(blob)
-  if (!isCachedArtifact(hash)) {
-    addArtifacts(newCacheArtifact(hash, new Artifact.InMemory(blob)) :: Nil)
-  }
-  hash
-}
+```python
+def cache_artifact(self, blob: bytes) -> str:
+    hash = hashlib.sha256(blob).hexdigest()
+    if not self.is_cached_artifact(hash):
+        requests = self._add_artifacts([new_cache_artifact(hash, InMemory(blob))])
+        response = self._retrieve_responses(requests)
+    return hash
 ```
 
-批量缓存时，通过一次 `getCachedArtifacts` RPC 批量查询，减少网络往返：
+批量缓存时，通过一次 `get_cached_artifacts` RPC 批量查询，减少网络往返：
 
-```scala
-def cacheArtifacts(blobs: Array[Array[Byte]]): Seq[String] = {
-  val hashes = blobs.map(sha256Hex).toSeq
-  val uniqueHashes = hashes.distinct
+```python
+def cache_artifacts(self, blobs: list[bytes]) -> list[str]:
+    # 计算所有 blob 的 SHA-256
+    hashes = [hashlib.sha256(blob).hexdigest() for blob in blobs]
+    unique_hashes = list(set(hashes))
 
-  // 批量查询哪些已缓存
-  val cachedHashes = getCachedArtifacts(uniqueHashes)
+    # 批量查询哪些已缓存
+    cached_hashes = self.get_cached_artifacts(unique_hashes)
 
-  // 只上传不存在的 Artifact
-  val uniqueBlobsToUpload = scala.collection.mutable.ListBuffer[Artifact]()
-  for ((blob, hash) <- blobs.zip(hashes)) {
-    if (!cachedHashes.contains(hash) && !seenHashes.contains(hash)) {
-      uniqueBlobsToUpload += newCacheArtifact(hash, new Artifact.InMemory(blob))
-    }
-  }
+    # 只上传不存在的 Artifact
+    seen_hashes = set()
+    artifacts_to_add = []
+    for blob, hash in zip(blobs, hashes):
+        if hash not in cached_hashes and hash not in seen_hashes:
+            artifacts_to_add.append(new_cache_artifact(hash, InMemory(blob)))
+            seen_hashes.add(hash)
 
-  if (uniqueBlobsToUpload.nonEmpty) {
-    addArtifacts(uniqueBlobsToUpload.toList)
-  }
-  hashes
-}
+    # 批量上传所有缺失的 Artifact
+    if artifacts_to_add:
+        requests = self._add_artifacts(artifacts_to_add)
+        response = self._retrieve_responses(requests)
+    return hashes
 ```
 
-`isCachedArtifact` 构建 `ArtifactStatusesRequest` 并发起 Unary RPC 调用：
+`is_cached_artifact` 构建 `ArtifactStatusesRequest` 并发起 Unary RPC 调用：
 
-```scala
-private[client] def isCachedArtifact(hash: String): Boolean = {
-  val artifactName = s"${Artifact.CACHE_PREFIX}/$hash"
-  val request = proto.ArtifactStatusesRequest.newBuilder()
-    .setSessionId(sessionId)
-    .addAllNames(Arrays.asList(artifactName))
-    .build()
-  val response = bstub.artifactStatus(request)
-  val statuses = response.getStatusesMap
-  if (statuses.containsKey(artifactName)) {
-    statuses.get(artifactName).getExists
-  } else false
-}
+```python
+def is_cached_artifact(self, hash: str) -> bool:
+    artifactName = CACHE_PREFIX + "/" + hash
+    request = proto.ArtifactStatusesRequest(
+        user_context=self._user_context,
+        session_id=self._session_id,
+        names=[artifactName]
+    )
+    resp = self._stub.ArtifactStatus(request, metadata=self._metadata)
+    status = resp.statuses.get(artifactName)
+    return status.exists if status is not None else False
 ```
 
 ### 服务端：查询 BlockManager
@@ -768,21 +800,20 @@ sequenceDiagram
     participant BM as BlockManager
     participant SC as SparkContext
 
-    Note over User,SC: 场景 1：上传 JAR 文件
-    User->>CM: addArtifact("my.jar")
-    CM->>CM: 构造 Artifact(jars/my.jar, LocalFile)
+    Note over User,SC: 场景 1：上传 Python 文件
+    User->>CM: addArtifact("module.py", pyfile=True)
+    CM->>CM: 构造 Artifact(pyfiles/module.py, LocalFile)
     CM->>GRPC: stream AddArtifactsRequest(batch or chunks)
     GRPC->>SH: onNext() → 写入 stagingDir
     GRPC->>SH: onCompleted() → flushStagedArtifacts()
-    SH->>SAM: addArtifact(jars/my.jar, stagedPath)
-    SAM->>SAM: 移动到 artifactPath/jars/my.jar
-    SAM->>SC: SparkContext.addJar(uri)
-    SAM->>SAM: 重建 ClassLoader
+    SH->>SAM: addArtifact(pyfiles/module.py, stagedPath)
+    SAM->>SAM: 移动到 artifactPath/pyfiles/module.py
+    SAM->>SC: SparkContext.addFile(uri)
     SH-->>CM: AddArtifactsResponse(CRC OK)
 
     Note over User,SC: 场景 2：缓存 UDF（带去重）
-    User->>CM: cacheArtifact(udfBytes)
-    CM->>CM: hash = SHA-256(udfBytes)
+    User->>CM: cache_artifact(udf_bytes)
+    CM->>CM: hash = sha256(udf_bytes).hexdigest()
     CM->>GRPC: ArtifactStatusesRequest(cache/{hash})
     GRPC->>BM: getStatus(CacheId)
     BM-->>GRPC: exists = false
@@ -795,8 +826,8 @@ sequenceDiagram
     SH-->>CM: AddArtifactsResponse
 
     Note over User,SC: 场景 3：重复缓存（命中）
-    User->>CM: cacheArtifact(sameUdfBytes)
-    CM->>CM: hash = SHA-256(sameUdfBytes)
+    User->>CM: cache_artifact(same_udf_bytes)
+    CM->>CM: hash = sha256(same_udf_bytes).hexdigest()
     CM->>GRPC: ArtifactStatusesRequest(cache/{hash})
     GRPC->>BM: getStatus(CacheId)
     BM-->>GRPC: exists = true
